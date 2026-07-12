@@ -1,0 +1,76 @@
+spring:
+  application:
+    name: ai-gateway
+
+ai:
+  gateway:
+    # Public demo traffic should prefer local or free-tier providers first.
+    default-model-alias: private-chat
+
+    endpoints:
+      - endpoint-id: ollama-local
+        provider-code: OLLAMA
+        deployment-type: LOCAL
+        model: llama3.1
+        base-url: http://localhost:11434
+        timeout-ms: 60000
+        max-retries: 0
+        priority: 1
+        enabled: true
+
+      - endpoint-id: gemini-free
+        provider-code: GEMINI
+        deployment-type: CLOUD
+        model: gemini-flash-latest
+        base-url: https://generativelanguage.googleapis.com
+        api-key-env: GEMINI_API_KEY
+        timeout-ms: 30000
+        max-retries: 1
+        priority: 2
+        enabled: true
+
+      - endpoint-id: groq-free
+        provider-code: GROQ
+        deployment-type: CLOUD
+        model: llama-3.1-8b-instant
+        base-url: https://api.groq.com/openai/v1
+        api-key-env: GROQ_API_KEY
+        timeout-ms: 30000
+        max-retries: 1
+        priority: 3
+        enabled: true
+
+      - endpoint-id: openai-cloud
+        provider-code: OPENAI
+        deployment-type: CLOUD
+        model: gpt-4o-mini
+        base-url: https://api.openai.com/v1
+        api-key-env: OPENAI_API_KEY
+        timeout-ms: 30000
+        max-retries: 1
+        priority: 10
+        enabled: false
+
+    model-aliases:
+      private-chat:
+        primary: ollama-local
+        fallback:
+          - gemini-free
+
+      general-chat:
+        primary: gemini-free
+        fallback:
+          - groq-free
+          - ollama-local
+
+      fast-chat:
+        primary: groq-free
+        fallback:
+          - gemini-free
+          - ollama-local
+
+      premium-chat:
+        primary: openai-cloud
+        fallback:
+          - gemini-free
+          - groq-free

@@ -17,6 +17,11 @@ public class AppChatRequest {
     private String promptId;
 
     /**
+     * 模型别名，例如 private-chat / general-chat / fast-chat
+     */
+    private String modelAlias;
+
+    /**
      * 动态替换的参数
      */
     private Map<String, Object> variables;

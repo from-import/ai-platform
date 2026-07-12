@@ -13,6 +13,6 @@ public class PromptTemplateManager {
      * 返回 "判断以下文本是否违规：我爱你"
      */
      public String renderPrompt(String promptId, AppChatRequest request) {
-         return request.getUserMessage();
+         return "You are a helpful AI assistant.";
      }
 }

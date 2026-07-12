@@ -1,14 +1,15 @@
-package org.frostnova.aigateway.provider.providerImpl;
+package org.frostnova.aigateway.provider.provider;
 
 import org.frostnova.aigateway.domain.model.LlmRequest;
 import org.frostnova.aigateway.domain.model.LlmResponse;
 import org.frostnova.aigateway.provider.LlmProvider;
+import org.frostnova.aigateway.provider.LlmProviderEnum;
 import org.springframework.stereotype.Component;
 
 @Component
-public class DeepSeekProviderImpl implements LlmProvider {
+public class DeepseekProvider implements LlmProvider {
     @Override
-    public String providerName() { return "deepseek"; }
+    public String getProviderCode() { return LlmProviderEnum.DEEPSEEK.getCode(); }
 
     @Override
     public LlmResponse chat(LlmRequest request) {

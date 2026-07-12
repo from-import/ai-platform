@@ -10,7 +10,7 @@ public interface LlmProvider {
     /**
      * 厂商唯一标识
      */
-    String providerName();
+    String getProviderCode();
 
     LlmResponse chat(LlmRequest request);
 }

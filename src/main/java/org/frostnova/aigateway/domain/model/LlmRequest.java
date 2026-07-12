@@ -2,6 +2,7 @@ package org.frostnova.aigateway.domain.model;
 
 import lombok.Data;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -10,12 +11,12 @@ import java.util.List;
 @Data
 public class LlmRequest {
     private String model;
-    private List<Message> messages;
+    private List<Message> messages = new ArrayList<>();
 
-    public void addMessage(String source, String messageBody) {
+    public void addMessage(String role, String content) {
         Message message = new Message();
-        message.setSource(source);
-        message.setBody(messageBody);
+        message.setRole(role);
+        message.setContent(content);
         messages.add(message);
     }
 

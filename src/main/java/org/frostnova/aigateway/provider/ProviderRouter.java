@@ -15,11 +15,11 @@ public class ProviderRouter {
 
     public ProviderRouter(List<LlmProvider> providerList) {
         for (LlmProvider p : providerList) {
-            providers.put(p.providerName(), p);
+            providers.put(p.getProviderCode(), p);
         }
     }
 
     public LlmProvider getProvider(String targetProvider) {
-        return providers.getOrDefault(targetProvider, providers.get("deepseek"));
+        return providers.getOrDefault(targetProvider, providers.get(LlmProviderEnum.DEEPSEEK.getCode()));
     }
 }

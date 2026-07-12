@@ -5,6 +5,7 @@ import org.frostnova.aigateway.domain.model.LlmRequest;
 import org.frostnova.aigateway.domain.model.LlmResponse;
 import org.frostnova.aigateway.prompt.PromptTemplateManager;
 import org.frostnova.aigateway.provider.LlmProvider;
+import org.frostnova.aigateway.provider.LlmProviderEnum;
 import org.frostnova.aigateway.provider.ProviderRouter;
 import org.springframework.stereotype.Service;
 
@@ -20,8 +21,6 @@ public class ChatService {
         this.providerRouter = providerRouter;
     }
 
-    private final static String DEEPSEEK = "deepseek";
-
     public LlmResponse executeChat(AppChatRequest request) {
         // 1. 获取并组装 System Prompt
         String systemPrompt = promptManager.renderPrompt(request.getPromptId(), request);
@@ -34,7 +33,7 @@ public class ChatService {
         }
 
         // 3. 路由到具体的模型厂商
-        LlmProvider provider = providerRouter.getProvider(DEEPSEEK);
+        LlmProvider provider = providerRouter.getProvider(LlmProviderEnum.GEMINI.getCode());
 
         // 4. 调用大模型
         LlmResponse response = provider.chat(llmRequest);

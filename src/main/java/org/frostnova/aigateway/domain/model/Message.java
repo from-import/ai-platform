@@ -8,6 +8,6 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @NoArgsConstructor
 public class Message {
-    private String body;
-    private String source;
+    private String role;
+    private String content;
 }
