@@ -20,6 +20,14 @@ public class ProviderRouter {
     }
 
     public LlmProvider getProvider(String targetProvider) {
-        return providers.getOrDefault(targetProvider, providers.get(LlmProviderEnum.DEEPSEEK.getCode()));
+        LlmProvider provider = providers.get(targetProvider);
+        if (provider == null) {
+            throw new IllegalStateException("No provider registered for code: " + targetProvider);
+        }
+        return provider;
+    }
+
+    public boolean hasProvider(String targetProvider) {
+        return providers.containsKey(targetProvider);
     }
 }

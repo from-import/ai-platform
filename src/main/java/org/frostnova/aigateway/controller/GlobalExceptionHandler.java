@@ -16,7 +16,15 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of(
                 "error", "LLM_PROVIDER_ERROR",
                 "status", ex.getStatusCode().value(),
-                "message", ex.getResponseBodyAsString()
+                "message", safeMessage(ex.getResponseBodyAsString())
+        ));
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, Object>> handleIllegalArgumentException(IllegalArgumentException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
+                "error", "INVALID_REQUEST",
+                "message", safeMessage(ex.getMessage())
         ));
     }
 
@@ -24,7 +32,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleIllegalStateException(IllegalStateException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
                 "error", "INVALID_GATEWAY_CONFIGURATION",
-                "message", ex.getMessage()
+                "message", safeMessage(ex.getMessage())
         ));
     }
 
@@ -32,7 +40,11 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleException(Exception ex) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
                 "error", "INTERNAL_SERVER_ERROR",
-                "message", ex.getMessage()
+                "message", safeMessage(ex.getMessage())
         ));
+    }
+
+    private String safeMessage(String message) {
+        return message == null || message.isBlank() ? "No error message available" : message;
     }
 }

@@ -5,7 +5,7 @@ spring:
 ai:
   gateway:
     # Public demo traffic should prefer local or free-tier providers first.
-    default-model-alias: private-chat
+    default-model-alias: general-chat
 
     endpoints:
       - endpoint-id: ollama-local
@@ -32,7 +32,7 @@ ai:
       - endpoint-id: groq-free
         provider-code: GROQ
         deployment-type: CLOUD
-        model: llama-3.1-8b-instant
+        model: llama-3.3-70b-versatile
         base-url: https://api.groq.com/openai/v1
         api-key-env: GROQ_API_KEY
         timeout-ms: 30000
