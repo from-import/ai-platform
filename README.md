@@ -15,6 +15,8 @@ The current milestone is the **LLM gateway**. The next milestone is an **agent r
 - API keys loaded from environment variables
 - Consistent JSON error responses for invalid requests and provider failures
 - Minimal web UI for sending prompts and inspecting responses and token usage
+- MySQL persistence for application credentials using MyBatis XML mappers
+- API key issuance, SHA-256 hashing, active-key lookup, and credential revocation
 
 The repository also contains placeholders for Ollama, OpenAI, and other providers. Their adapters are not implemented yet.
 
@@ -82,18 +84,42 @@ Prerequisites:
 
 - Java 21+
 - Maven 3.9+
+- MySQL 8.4+
 - A Gemini API key and/or Groq API key
 
-Set API keys in your shell or IDE run configuration:
+Create the local database and credential table:
 
 ```bash
+mysql -u root -p < database/mysql/001_create_app_credential.sql
+```
+
+Create a dedicated application user from the MySQL console:
+
+```sql
+CREATE USER 'ai_platform_app'@'localhost'
+    IDENTIFIED BY 'choose-a-local-password';
+
+GRANT SELECT, INSERT, UPDATE, DELETE
+    ON ai_platform.*
+    TO 'ai_platform_app'@'localhost';
+
+FLUSH PRIVILEGES;
+```
+
+Set database and provider credentials in your shell or IDE run configuration:
+
+```bash
+export AI_PLATFORM_DB_URL="jdbc:mysql://localhost:3306/ai_platform?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+export AI_PLATFORM_DB_USERNAME="ai_platform_app"
+export AI_PLATFORM_DB_PASSWORD="your-local-database-password"
 export GEMINI_API_KEY="your-gemini-api-key"
 export GROQ_API_KEY="your-groq-api-key"
 ```
 
-Start the application:
+Run the tests and start the application:
 
 ```bash
+mvn clean test
 mvn spring-boot:run
 ```
 
@@ -122,13 +148,16 @@ Never commit API keys. The YAML configuration stores environment variable names 
 - Spring Boot 4
 - Spring MVC `RestClient`
 - Jackson
+- MySQL 8.4
+- MyBatis 4 with XML mappers
+- H2 for persistence integration tests
 - Maven
 - Vanilla HTML/CSS/JavaScript demo UI
 
 ## Roadmap
 
-1. **Application identity and usage accounting**
-   Persist app credentials, quotas, request records, and token usage with MySQL and MyBatis.
+1. **Request authentication and usage accounting**
+   Authenticate gateway requests with issued API keys, then persist request records, quotas, and token usage.
 2. **Gateway resilience**
    Add runtime failover, bounded retries, timeouts, rate limiting, and circuit breaking.
 3. **Observability**
