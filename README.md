@@ -1,97 +1,143 @@
-# AIGateway (AI 应用中台 / LLM Control Plane)
+# AI Platform
 
-An **AI Application Platform** that provides a unified control plane for prompt management, model routing, structured output, caching, async execution, security governance, and RAG ingestion/retrieval, enabling production-grade LLM applications rather than one-off demos.
+A Spring Boot backend that exposes one chat API and routes requests to different LLM providers through a normalized request/response model.
 
-> Focus: **Reliability / Cost Control / Observability / Security & Compliance / Pluggable Engineering Abstractions**
-> 
-> **这个项目的目标，不是单纯封装大模型接口，而是构建一个可复用的 AI 应用基础设施层。它向上为业务场景提供统一的文本生成、分类、抽取、问答和知识检索能力，向下屏蔽不同模型供应商、向量数据库和异步执行框架的差异；同时通过 Prompt 版本化、模型路由、缓存幂等、超时重试、限流配额、审计日志与脱敏治理，使 AI 能力具备生产环境可落地的可靠性、成本可控性和安全合规性。**
+The current milestone is the **LLM gateway**. The next milestone is an **agent runtime** with tool calling, controlled code access, and a ReAct execution loop.
 
----
+## What Works Today
 
-## Why this project
+- End-to-end Gemini API integration
+- End-to-end Groq API integration
+- Provider abstraction and runtime provider registry
+- Configuration-driven model endpoints and model aliases
+- Primary/fallback endpoint selection based on enabled and registered providers
+- Normalized chat request and response objects
+- API keys loaded from environment variables
+- Consistent JSON error responses for invalid requests and provider failures
+- Minimal web UI for sending prompts and inspecting responses and token usage
 
-LLM features often fail in production not because “the model is weak”, but because engineering essentials are missing:
-- no stable prompt versioning & rollout
-- no fallback/retry/timeout policies
-- repeated requests burn money
-- lack of trace/metrics/audit
-- prompt injection / sensitive data leakage risk
+The repository also contains placeholders for Ollama, OpenAI, and other providers. Their adapters are not implemented yet.
 
-This project aims to provide a reusable “control plane” for AI applications.
+## Request Flow
 
+```mermaid
+flowchart LR
+    Client["Web UI / API Client"] --> API["POST /api/v1/chat/completions"]
+    API --> Service["ChatService"]
+    Service --> Alias["Model Alias Resolver"]
+    Alias --> Router["ProviderRouter"]
+    Router --> Gemini["Gemini Provider"]
+    Router --> Groq["Groq Provider"]
+    Gemini --> Response["Normalized LlmResponse"]
+    Groq --> Response
+```
 
+`ChatService` resolves a logical model alias, builds a provider-neutral `LlmRequest`, and delegates it to the registered provider implementation. Provider-specific payloads and response parsing stay inside each adapter.
 
----
+## API
 
-## Core Modules
+### Request
 
-### 1) Prompt Management (PromptOps)
-- Prompt versioning (config-center style)
-- AB Test / gray release (traffic split)
-- Output contract: **JSON Schema constrained output**
+```http
+POST /api/v1/chat/completions
+Content-Type: application/json
+```
 
-### 2) LLM Gateway (Core)
-- Multi-provider integration: OpenAI / Claude / DeepSeek / local Ollama
-- Retry / degrade / fallback
-- Timeout, token budget, concurrency control
+```json
+{
+  "modelAlias": "general-chat",
+  "userMessage": "Explain how AI works in a few words"
+}
+```
 
-### 3) Result Cache & Idempotency
-- `hash(promptVersion + normalizedInput)` → Redis
-- Prevent duplicated billing, improve P99 latency
+### Response
 
-### 4) Async & Task Queue
-- RabbitMQ / Kafka (pluggable)
-- Long-text processing / batch jobs / document analysis pipelines
+```json
+{
+  "content": "Data + Algorithms = Insights",
+  "promptTokens": 0,
+  "completionTokens": 0,
+  "providerName": "GEMINI"
+}
+```
 
-### 5) Security & Audit (High-value)
-- Prompt injection defense
-- Input/output redaction (PII masking)
-- End-to-end **structured logs + audit trail**
+Token values depend on whether the selected provider returns usage metadata.
 
-### 6) Business Demos
-- AI Text Moderation
-- Ticket / Work-order Auto Attribution
-- Knowledge Base QA (RAG)
+## Model Aliases
 
-### Extra: RAG Capability
-- Upload PDF/TXT → chunking → embedding → vector DB
-- Retrieval + re-ranking + answer generation
+Aliases decouple callers from provider names and concrete model IDs.
 
----
+| Alias | Configured primary | Intended use |
+|---|---|---|
+| `general-chat` | Gemini | Default general-purpose chat |
+| `fast-chat` | Groq | Low-latency chat |
+| `private-chat` | Ollama | Local-model traffic; currently falls back to an implemented provider |
+| `premium-chat` | OpenAI | Premium traffic; currently disabled and falls back |
 
-## Non-functional Goals
+Endpoint and fallback configuration lives in `src/main/resources/application.yml`.
 
-### Reliability
-- timeout, retry, circuit breaker, fallback
-- concurrency limits, rate limit, quotas
+## Run Locally
 
-### Cost Control
-- caching, idempotency
-- batching, token budgets
-- provider routing policies
+Prerequisites:
 
-### Observability
-- tracing (OpenTelemetry-ready)
-- metrics (Micrometer/Prometheus-ready)
-- structured logs (JSON) + audit events
+- Java 21+
+- Maven 3.9+
+- A Gemini API key and/or Groq API key
 
-### Security & Compliance
-- redaction, access control, injection defense
-- data retention policy & auditability
-
-### Engineering Abstractions
-- provider interface, strategy/policy pattern
-- plug-in architecture
-- versioned configs
-
----
-
-## Quick Start (Local)
-
-> Prerequisites:
-- Java 17+ (recommended)
+Set API keys in your shell or IDE run configuration:
 
 ```bash
-# build & run
-mvn clean package
+export GEMINI_API_KEY="your-gemini-api-key"
+export GROQ_API_KEY="your-groq-api-key"
+```
+
+Start the application:
+
+```bash
 mvn spring-boot:run
+```
+
+Open the demo UI:
+
+```text
+http://localhost:8080/
+```
+
+Or call the API directly:
+
+```bash
+curl --request POST "http://localhost:8080/api/v1/chat/completions" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "modelAlias": "general-chat",
+    "userMessage": "Explain how AI works in a few words"
+  }'
+```
+
+Never commit API keys. The YAML configuration stores environment variable names only.
+
+## Tech Stack
+
+- Java 21
+- Spring Boot 4
+- Spring MVC `RestClient`
+- Jackson
+- Maven
+- Vanilla HTML/CSS/JavaScript demo UI
+
+## Roadmap
+
+1. **Application identity and usage accounting**
+   Persist app credentials, quotas, request records, and token usage with MySQL and MyBatis.
+2. **Gateway resilience**
+   Add runtime failover, bounded retries, timeouts, rate limiting, and circuit breaking.
+3. **Observability**
+   Add request IDs, latency metrics, provider-level success rates, and traceable execution records.
+4. **Agent runtime**
+   Implement function calling, a tool registry, bounded ReAct loops, step persistence, cancellation, and execution limits.
+5. **Controlled code tools**
+   Add workspace allowlists, path validation, file-size limits, timeouts, and explicit tool permissions before enabling code or file access.
+
+## Status
+
+This is an actively developed portfolio project. The README describes the behavior currently present in the repository; roadmap items are intentionally listed separately.
