@@ -31,7 +31,7 @@ class AppCredentialServiceTests {
                 "portfolio-demo",
                 30,
                 100_000,
-                "[\"general-chat\",\"fast-chat\"]"
+                "[\"gemini/gemini-flash-latest\",\"groq/llama-3.3-70b-versatile\"]"
         );
 
         AppCredential stored = credentialMapper.findByAppId(issued.appId());
@@ -40,6 +40,8 @@ class AppCredentialServiceTests {
                 .hasSize(64)
                 .isNotEqualTo(issued.apiKey());
         assertThat(stored.getStatus()).isEqualTo(AppCredentialStatus.ACTIVE);
+        assertThat(stored.getAllowedModels())
+                .isEqualTo("[\"gemini/gemini-flash-latest\",\"groq/llama-3.3-70b-versatile\"]");
 
         Optional<AppCredential> authenticated = credentialService.findActiveByApiKey(issued.apiKey());
         assertThat(authenticated).isPresent();

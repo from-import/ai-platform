@@ -6,6 +6,7 @@ import org.frostnova.aigateway.domain.model.LlmResponse;
 import org.frostnova.aigateway.domain.model.Message;
 import org.frostnova.aigateway.provider.LlmProvider;
 import org.frostnova.aigateway.provider.LlmProviderEnum;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -16,38 +17,40 @@ import java.util.List;
 import java.util.Map;
 
 @Component
+@ConditionalOnProperty(
+        prefix = "ai.gateway.providers.gemini",
+        name = "enabled",
+        havingValue = "true"
+)
 public class GeminiProvider implements LlmProvider {
 
     private final RestClient restClient;
-    private final AiGatewayProperties.ModelEndpoint endpoint;
+    private final String apiKeyEnv;
 
     public GeminiProvider(AiGatewayProperties properties) {
-        this.endpoint = properties.getEndpoints().stream()
-                .filter(item -> LlmProviderEnum.GEMINI.equals(item.getProviderCode()))
-                .filter(item -> Boolean.TRUE.equals(item.getEnabled()))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("No enabled Gemini endpoint configured"));
+        AiGatewayProperties.ProviderConfig config = properties.requireProvider(LlmProviderEnum.GEMINI);
+        this.apiKeyEnv = config.getApiKeyEnv();
         this.restClient = RestClient.builder()
-                .baseUrl(endpoint.getBaseUrl())
+                .baseUrl(config.getBaseUrl())
                 .build();
     }
 
     @Override
-    public String getProviderCode() {
-        return LlmProviderEnum.GEMINI.getCode();
+    public LlmProviderEnum getProviderCode() {
+        return LlmProviderEnum.GEMINI;
     }
 
     @Override
     public LlmResponse chat(LlmRequest request) {
-        String apiKey = System.getenv(endpoint.getApiKeyEnv());
+        String apiKey = System.getenv(apiKeyEnv);
         if (apiKey == null || apiKey.isBlank()) {
-            throw new IllegalStateException("Missing environment variable: " + endpoint.getApiKeyEnv());
+            throw new IllegalStateException("Missing environment variable: " + apiKeyEnv);
         }
 
         JsonNode responseBody;
         try {
             responseBody = restClient.post()
-                    .uri("/v1beta/models/{model}:generateContent", endpoint.getModel())
+                    .uri("/v1beta/models/{model}:generateContent", request.getModel())
                     .contentType(MediaType.APPLICATION_JSON)
                     .header("X-goog-api-key", apiKey)
                     .body(buildGeminiRequest(request))
@@ -59,7 +62,7 @@ public class GeminiProvider implements LlmProvider {
 
         LlmResponse response = new LlmResponse();
         response.setContent(extractText(responseBody));
-        response.setProviderName(getProviderCode());
+        response.setProviderName(getProviderCode().getCode());
         return response;
     }
 

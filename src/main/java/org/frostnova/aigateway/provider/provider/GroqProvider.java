@@ -5,6 +5,7 @@ import org.frostnova.aigateway.domain.model.LlmRequest;
 import org.frostnova.aigateway.domain.model.LlmResponse;
 import org.frostnova.aigateway.provider.LlmProvider;
 import org.frostnova.aigateway.provider.LlmProviderEnum;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -14,32 +15,34 @@ import tools.jackson.databind.JsonNode;
 import java.util.Map;
 
 @Component
+@ConditionalOnProperty(
+        prefix = "ai.gateway.providers.groq",
+        name = "enabled",
+        havingValue = "true"
+)
 public class GroqProvider implements LlmProvider {
 
     private final RestClient restClient;
-    private final AiGatewayProperties.ModelEndpoint endpoint;
+    private final String apiKeyEnv;
 
     public GroqProvider(AiGatewayProperties properties) {
-        this.endpoint = properties.getEndpoints().stream()
-                .filter(item -> LlmProviderEnum.GROQ.equals(item.getProviderCode()))
-                .filter(item -> Boolean.TRUE.equals(item.getEnabled()))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("No enabled Groq endpoint configured"));
+        AiGatewayProperties.ProviderConfig config = properties.requireProvider(LlmProviderEnum.GROQ);
+        this.apiKeyEnv = config.getApiKeyEnv();
         this.restClient = RestClient.builder()
-                .baseUrl(endpoint.getBaseUrl())
+                .baseUrl(config.getBaseUrl())
                 .build();
     }
 
     @Override
-    public String getProviderCode() {
-        return LlmProviderEnum.GROQ.getCode();
+    public LlmProviderEnum getProviderCode() {
+        return LlmProviderEnum.GROQ;
     }
 
     @Override
     public LlmResponse chat(LlmRequest request) {
-        String apiKey = System.getenv(endpoint.getApiKeyEnv());
+        String apiKey = System.getenv(apiKeyEnv);
         if (apiKey == null || apiKey.isBlank()) {
-            throw new IllegalStateException("Missing environment variable: " + endpoint.getApiKeyEnv());
+            throw new IllegalStateException("Missing environment variable: " + apiKeyEnv);
         }
 
         JsonNode responseBody = restClient.post()
@@ -47,7 +50,7 @@ public class GroqProvider implements LlmProvider {
                 .contentType(MediaType.APPLICATION_JSON)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
                 .body(Map.of(
-                        "model", request.getModel() == null ? endpoint.getModel() : request.getModel(),
+                        "model", request.getModel(),
                         "messages", request.getMessages()
                 ))
                 .retrieve()
@@ -55,7 +58,7 @@ public class GroqProvider implements LlmProvider {
 
         LlmResponse response = new LlmResponse();
         response.setContent(extractText(responseBody));
-        response.setProviderName(getProviderCode());
+        response.setProviderName(getProviderCode().getCode());
         if (responseBody != null) {
             response.setPromptTokens(responseBody.path("usage").path("prompt_tokens").asInt(0));
             response.setCompletionTokens(responseBody.path("usage").path("completion_tokens").asInt(0));

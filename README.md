@@ -2,15 +2,16 @@
 
 A Spring Boot backend that exposes one chat API and routes requests to different LLM providers through a normalized request/response model.
 
-The current milestone is the **LLM gateway**. The next milestone is an **agent runtime** with tool calling, controlled code access, and a ReAct execution loop.
+The current milestone is a small, explicit **LLM gateway**. Clients select a concrete model using `provider/model`, while the gateway normalizes provider protocols and keeps upstream credentials on the server.
 
 ## What Works Today
 
 - End-to-end Gemini API integration
 - End-to-end Groq API integration
-- Provider abstraction and runtime provider registry
-- Configuration-driven model endpoints and model aliases
-- Primary/fallback endpoint selection based on enabled and registered providers
+- Provider-neutral interface with Gemini and Groq adapters
+- Immutable runtime provider registry
+- Configuration-driven provider connections and supported-model allowlist
+- Request-level concrete model selection using `provider/model`
 - Normalized chat request and response objects
 - API keys loaded from environment variables
 - Consistent JSON error responses for invalid requests and provider failures
@@ -18,23 +19,21 @@ The current milestone is the **LLM gateway**. The next milestone is an **agent r
 - MySQL persistence for application credentials using MyBatis XML mappers
 - API key issuance, SHA-256 hashing, active-key lookup, and credential revocation
 
-The repository also contains placeholders for Ollama, OpenAI, and other providers. Their adapters are not implemented yet.
-
 ## Request Flow
 
 ```mermaid
 flowchart LR
     Client["Web UI / API Client"] --> API["POST /api/v1/chat/completions"]
     API --> Service["ChatService"]
-    Service --> Alias["Model Alias Resolver"]
-    Alias --> Router["ProviderRouter"]
-    Router --> Gemini["Gemini Provider"]
-    Router --> Groq["Groq Provider"]
+    Service --> Model["Validate provider/model"]
+    Model --> Registry["ProviderRegistry"]
+    Registry --> Gemini["Gemini Provider"]
+    Registry --> Groq["Groq Provider"]
     Gemini --> Response["Normalized LlmResponse"]
     Groq --> Response
 ```
 
-`ChatService` resolves a logical model alias, builds a provider-neutral `LlmRequest`, and delegates it to the registered provider implementation. Provider-specific payloads and response parsing stay inside each adapter.
+`ChatService` validates the requested model, parses its provider prefix, builds a provider-neutral `LlmRequest`, and delegates it to the registered provider implementation. Provider-specific payloads and response parsing stay inside each adapter.
 
 ## API
 
@@ -47,7 +46,7 @@ Content-Type: application/json
 
 ```json
 {
-  "modelAlias": "general-chat",
+  "model": "gemini/gemini-flash-latest",
   "userMessage": "Explain how AI works in a few words"
 }
 ```
@@ -59,24 +58,20 @@ Content-Type: application/json
   "content": "Data + Algorithms = Insights",
   "promptTokens": 0,
   "completionTokens": 0,
-  "providerName": "GEMINI"
+  "providerName": "gemini"
 }
 ```
 
 Token values depend on whether the selected provider returns usage metadata.
 
-## Model Aliases
+## Supported Models
 
-Aliases decouple callers from provider names and concrete model IDs.
+Clients select a concrete model using the `provider/model` format. The current allowlist is:
 
-| Alias | Configured primary | Intended use |
-|---|---|---|
-| `general-chat` | Gemini | Default general-purpose chat |
-| `fast-chat` | Groq | Low-latency chat |
-| `private-chat` | Ollama | Local-model traffic; currently falls back to an implemented provider |
-| `premium-chat` | OpenAI | Premium traffic; currently disabled and falls back |
+- `gemini/gemini-flash-latest`
+- `groq/llama-3.3-70b-versatile`
 
-Endpoint and fallback configuration lives in `src/main/resources/application.yml`.
+Provider connections and the model allowlist live in `src/main/resources/application.yml`. Adding a model that uses an existing provider protocol requires configuration only; adding a provider with a new protocol requires a new `LlmProvider` adapter.
 
 ## Run Locally
 
@@ -135,7 +130,7 @@ Or call the API directly:
 curl --request POST "http://localhost:8080/api/v1/chat/completions" \
   --header "Content-Type: application/json" \
   --data '{
-    "modelAlias": "general-chat",
+    "model": "gemini/gemini-flash-latest",
     "userMessage": "Explain how AI works in a few words"
   }'
 ```

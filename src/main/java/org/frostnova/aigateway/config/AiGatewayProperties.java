@@ -5,37 +5,31 @@ import org.frostnova.aigateway.provider.LlmProviderEnum;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 @Data
 @Component
 @ConfigurationProperties(prefix = "ai.gateway")
 public class AiGatewayProperties {
 
-    private String defaultModelAlias;
-    private List<ModelEndpoint> endpoints = new ArrayList<>();
-    private Map<String, ModelAlias> modelAliases = new HashMap<>();
+    private Map<LlmProviderEnum, ProviderConfig> providers = new HashMap<>();
+    private Set<String> supportedModels = new LinkedHashSet<>();
 
     @Data
-    public static class ModelEndpoint {
-        private String endpointId;
-        private LlmProviderEnum providerCode;
-        private DeploymentType deploymentType;
-        private String model;
+    public static class ProviderConfig {
         private String baseUrl;
         private String apiKeyEnv;
-        private Integer timeoutMs = 30_000;
-        private Integer maxRetries = 0;
-        private Integer priority = 100;
         private Boolean enabled = true;
     }
 
-    @Data
-    public static class ModelAlias {
-        private String primary;
-        private List<String> fallback = new ArrayList<>();
+    public ProviderConfig requireProvider(LlmProviderEnum providerCode) {
+        ProviderConfig provider = providers.get(providerCode);
+        if (provider == null || !Boolean.TRUE.equals(provider.getEnabled())) {
+            throw new IllegalStateException("Provider is not configured or enabled: " + providerCode.getCode());
+        }
+        return provider;
     }
 }

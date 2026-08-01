@@ -34,7 +34,7 @@ public class AppCredentialService {
             String appName,
             int rateLimitPerMinute,
             long dailyTokenQuota,
-            String allowedModelAliases
+            String allowedModels
     ) {
         validateIssueRequest(appName, rateLimitPerMinute, dailyTokenQuota);
 
@@ -49,7 +49,7 @@ public class AppCredentialService {
                 .status(AppCredentialStatus.ACTIVE)
                 .rateLimitPerMinute(rateLimitPerMinute)
                 .dailyTokenQuota(dailyTokenQuota)
-                .allowedModelAliases(normalizeAllowedModelAliases(allowedModelAliases))
+                .allowedModels(normalizeAllowedModels(allowedModels))
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
@@ -89,10 +89,10 @@ public class AppCredentialService {
         }
     }
 
-    private String normalizeAllowedModelAliases(String allowedModelAliases) {
-        return allowedModelAliases == null || allowedModelAliases.isBlank()
+    private String normalizeAllowedModels(String allowedModels) {
+        return allowedModels == null || allowedModels.isBlank()
                 ? "[]"
-                : allowedModelAliases.trim();
+                : allowedModels.trim();
     }
 
     private String generateApiKey() {

@@ -2,29 +2,12 @@ package org.frostnova.aigateway.domain.model;
 
 import lombok.Data;
 
-import java.util.Map;
-
 @Data
 public class AppChatRequest {
     /**
-     * 标识是哪个业务（用于后续鉴权、计费）
+     * 具体模型，格式为 provider/model，例如 gemini/gemini-flash-latest
      */
-    private String appId;
-
-    /**
-     * 使用的 Prompt 模板 ID
-     */
-    private String promptId;
-
-    /**
-     * 模型别名，例如 private-chat / general-chat / fast-chat
-     */
-    private String modelAlias;
-
-    /**
-     * 动态替换的参数
-     */
-    private Map<String, Object> variables;
+    private String model;
 
     /**
      * 提问文本内容

@@ -4,83 +4,53 @@ import org.frostnova.aigateway.config.AiGatewayProperties;
 import org.frostnova.aigateway.domain.model.AppChatRequest;
 import org.frostnova.aigateway.domain.model.LlmRequest;
 import org.frostnova.aigateway.domain.model.LlmResponse;
-import org.frostnova.aigateway.prompt.PromptTemplateManager;
 import org.frostnova.aigateway.provider.LlmProvider;
-import org.frostnova.aigateway.provider.ProviderRouter;
+import org.frostnova.aigateway.provider.LlmProviderEnum;
+import org.frostnova.aigateway.provider.ProviderRegistry;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
-import java.util.List;
-
-// core/ChatService.java
 @Service
 public class ChatService {
 
-    private final PromptTemplateManager promptManager;
-    private final ProviderRouter providerRouter;
+    private final ProviderRegistry providerRegistry;
     private final AiGatewayProperties properties;
 
-    public ChatService(PromptTemplateManager promptManager, ProviderRouter providerRouter, AiGatewayProperties properties) {
-        this.promptManager = promptManager;
-        this.providerRouter = providerRouter;
+    public ChatService(ProviderRegistry providerRegistry, AiGatewayProperties properties) {
+        this.providerRegistry = providerRegistry;
         this.properties = properties;
     }
 
     public LlmResponse executeChat(AppChatRequest request) {
-        AiGatewayProperties.ModelEndpoint endpoint = resolveEndpoint(request.getModelAlias());
+        String requestedModel = requireModel(request.getModel());
+        int separatorIndex = requestedModel.indexOf('/');
+        if (separatorIndex <= 0 || separatorIndex == requestedModel.length() - 1) {
+            throw new IllegalArgumentException("Model must use provider/model format");
+        }
 
-        // 1. 获取并组装 System Prompt
-        String systemPrompt = promptManager.renderPrompt(request.getPromptId(), request);
+        String providerPrefix = requestedModel.substring(0, separatorIndex);
+        String upstreamModel = requestedModel.substring(separatorIndex + 1);
+        LlmProviderEnum providerCode = LlmProviderEnum.getProviderByCode(providerPrefix);
+        if (providerCode == null) {
+            throw new IllegalArgumentException("Unsupported provider: " + providerPrefix);
+        }
+        if (!properties.getSupportedModels().contains(requestedModel)) {
+            throw new IllegalArgumentException("Unsupported model: " + requestedModel);
+        }
 
-        // 2. 组装标准 LlmRequest
         LlmRequest llmRequest = new LlmRequest();
-        llmRequest.setModel(endpoint.getModel());
-        llmRequest.addMessage("system", systemPrompt);
+        llmRequest.setModel(upstreamModel);
         if (request.getUserMessage() != null) {
             llmRequest.addMessage("user", request.getUserMessage());
         }
 
-        // 3. 路由到具体的模型厂商
-        LlmProvider provider = providerRouter.getProvider(endpoint.getProviderCode().getCode());
-
-        // 4. 调用大模型
-        LlmResponse response = provider.chat(llmRequest);
-
-        // 5. 返回结果
-        return response;
+        LlmProvider provider = providerRegistry.getProvider(providerCode);
+        return provider.chat(llmRequest);
     }
 
-    private AiGatewayProperties.ModelEndpoint resolveEndpoint(String requestedModelAlias) {
-        String modelAlias = requestedModelAlias == null || requestedModelAlias.isBlank()
-                ? properties.getDefaultModelAlias()
-                : requestedModelAlias;
-        AiGatewayProperties.ModelAlias alias = properties.getModelAliases().get(modelAlias);
-        if (alias == null) {
-            throw new IllegalArgumentException("Unknown model alias: " + modelAlias);
+    private String requireModel(String requestedModel) {
+        if (requestedModel == null || requestedModel.isBlank()) {
+            throw new IllegalArgumentException("Model must not be blank");
         }
-
-        List<String> endpointIds = new ArrayList<>();
-        endpointIds.add(alias.getPrimary());
-        endpointIds.addAll(alias.getFallback());
-
-        for (String endpointId : endpointIds) {
-            AiGatewayProperties.ModelEndpoint endpoint = findEnabledEndpoint(endpointId);
-            if (endpoint != null && providerRouter.hasProvider(endpoint.getProviderCode().getCode())) {
-                return endpoint;
-            }
-        }
-
-        throw new IllegalStateException("No available endpoint for model alias: " + modelAlias);
-    }
-
-    private AiGatewayProperties.ModelEndpoint findEnabledEndpoint(String endpointId) {
-        if (endpointId == null || endpointId.isBlank()) {
-            return null;
-        }
-        return properties.getEndpoints().stream()
-                .filter(item -> endpointId.equals(item.getEndpointId()))
-                .filter(item -> Boolean.TRUE.equals(item.getEnabled()))
-                .findFirst()
-                .orElse(null);
+        return requestedModel;
     }
 }

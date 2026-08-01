@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS app_credential (
     status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
     rate_limit_per_minute INT UNSIGNED NOT NULL DEFAULT 60,
     daily_token_quota BIGINT UNSIGNED NOT NULL DEFAULT 100000,
-    allowed_model_aliases JSON NULL,
+    allowed_models JSON NULL,
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
         ON UPDATE CURRENT_TIMESTAMP(3),

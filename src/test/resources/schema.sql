@@ -8,7 +8,7 @@ CREATE TABLE app_credential (
     status VARCHAR(16) NOT NULL,
     rate_limit_per_minute INTEGER NOT NULL,
     daily_token_quota BIGINT NOT NULL,
-    allowed_model_aliases VARCHAR(1024),
+    allowed_models VARCHAR(1024),
     created_at TIMESTAMP(3) NOT NULL,
     updated_at TIMESTAMP(3) NOT NULL
 );

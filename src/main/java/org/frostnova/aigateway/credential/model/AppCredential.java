@@ -20,7 +20,7 @@ public class AppCredential {
     private AppCredentialStatus status;
     private Integer rateLimitPerMinute;
     private Long dailyTokenQuota;
-    private String allowedModelAliases;
+    private String allowedModels;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

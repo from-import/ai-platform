@@ -226,12 +226,10 @@
 
     <div class="workspace">
         <section>
-            <label for="modelAlias">Model Alias</label>
-            <select id="modelAlias">
-                <option value="general-chat">general-chat</option>
-                <option value="private-chat">private-chat</option>
-                <option value="fast-chat">fast-chat</option>
-                <option value="premium-chat">premium-chat</option>
+            <label for="model">Model</label>
+            <select id="model">
+                <option value="gemini/gemini-flash-latest">gemini/gemini-flash-latest</option>
+                <option value="groq/llama-3.3-70b-versatile">groq/llama-3.3-70b-versatile</option>
             </select>
 
             <label for="prompt">Prompt</label>
@@ -270,7 +268,7 @@
     const completionTokensEl = document.querySelector("#completionTokens");
     const sendButton = document.querySelector("#sendButton");
     const promptEl = document.querySelector("#prompt");
-    const modelAliasEl = document.querySelector("#modelAlias");
+    const modelEl = document.querySelector("#model");
 
     function setStatus(text, state = "") {
         statusEl.textContent = text;
@@ -304,7 +302,7 @@
                     "Content-Type": "application/json"
                 },
                 body: JSON.stringify({
-                    modelAlias: modelAliasEl.value,
+                    model: modelEl.value,
                     userMessage
                 })
             });
