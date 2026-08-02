@@ -12,6 +12,10 @@ mybatis:
   configuration:
     map-underscore-to-camel-case: true
 
+logging:
+  pattern:
+    correlation: "[requestId=%X{requestId:-}] "
+
 ai:
   gateway:
     providers:

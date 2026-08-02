@@ -1,0 +1,9 @@
+logging:
+  structured:
+    format:
+      console: ecs
+    ecs:
+      service:
+        name: ai-platform
+        version: ${APP_VERSION:dev}
+        environment: ${APP_ENV:prod}

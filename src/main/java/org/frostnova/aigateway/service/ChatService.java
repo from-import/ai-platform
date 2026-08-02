@@ -1,5 +1,6 @@
 package org.frostnova.aigateway.service;
 
+import lombok.extern.slf4j.Slf4j;
 import org.frostnova.aigateway.common.exception.BaseException;
 import org.frostnova.aigateway.common.exception.ErrorCodes;
 import org.frostnova.aigateway.config.AiGatewayProperties;
@@ -14,9 +15,9 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+@Slf4j
 @Service
 public class ChatService {
 
@@ -34,35 +35,54 @@ public class ChatService {
         this.requestRecordService = requestRecordService;
     }
 
-    public LlmResponse executeChat(AppChatRequest request) {
+    public LlmResponse executeChat(String requestId, AppChatRequest request) {
         LlmProviderEnum provider = LlmProviderEnum.requireByCode(request.getProvider());
         String model = properties.requireSupportedModel(provider, request.getModel());
         LlmRequest llmRequest = toLlmRequest(request, model);
 
-        String requestId = UUID.randomUUID().toString();
         LocalDateTime requestedAt = LocalDateTime.now(ZoneOffset.UTC);
         long startNanos = System.nanoTime();
 
         try {
-            LlmResponse response = providerRegistry.getProvider(provider).chat(llmRequest);
+            LlmResponse response = providerRegistry.getProvider(provider).chat(requestId, llmRequest);
+            long durationNanos = elapsedNanos(startNanos);
+            long latencyMs = TimeUnit.NANOSECONDS.toMillis(durationNanos);
             requestRecordService.recordSuccess(
                     requestId,
                     provider.getCode(),
                     model,
                     response,
-                    elapsedMillis(startNanos),
+                    latencyMs,
                     requestedAt
             );
+            log.atInfo()
+                    .addKeyValue("event.action", "llm.chat")
+                    .addKeyValue("event.outcome", "success")
+                    .addKeyValue("event.duration", durationNanos)
+                    .addKeyValue("provider", provider.getCode())
+                    .addKeyValue("model", model)
+                    .log("LLM request completed");
             return response;
         } catch (RuntimeException exception) {
+            long durationNanos = elapsedNanos(startNanos);
+            long latencyMs = TimeUnit.NANOSECONDS.toMillis(durationNanos);
             requestRecordService.recordFailure(
                     requestId,
                     provider.getCode(),
                     model,
                     exception,
-                    elapsedMillis(startNanos),
+                    latencyMs,
                     requestedAt
             );
+            log.atError()
+                    .addKeyValue("event.action", "llm.chat")
+                    .addKeyValue("event.outcome", "failure")
+                    .addKeyValue("event.duration", durationNanos)
+                    .addKeyValue("error.code", errorCode(exception))
+                    .addKeyValue("provider", provider.getCode())
+                    .addKeyValue("model", model)
+                    .setCause(exception)
+                    .log("LLM request failed");
             if (exception instanceof BaseException baseException) {
                 throw baseException;
             }
@@ -75,8 +95,15 @@ public class ChatService {
         }
     }
 
-    private long elapsedMillis(long startNanos) {
-        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
+    private long elapsedNanos(long startNanos) {
+        return System.nanoTime() - startNanos;
+    }
+
+    private String errorCode(RuntimeException exception) {
+        if (exception instanceof BaseException baseException) {
+            return baseException.getCode();
+        }
+        return ErrorCodes.INTERNAL_SERVER_ERROR;
     }
 
     private LlmRequest toLlmRequest(AppChatRequest request, String model) {

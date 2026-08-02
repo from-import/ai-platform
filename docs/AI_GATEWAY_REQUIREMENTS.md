@@ -260,8 +260,8 @@ public interface LlmProvider {
 
 ### Milestone 3：可观测性
 
-- [ ] Request ID。
-- [ ] 结构化日志。
+- [x] Request ID。
+- [x] 结构化日志。
 - [ ] Micrometer/Prometheus metrics。
 - [ ] OpenTelemetry request/provider spans。
 - [ ] Provider 成功率和延迟。

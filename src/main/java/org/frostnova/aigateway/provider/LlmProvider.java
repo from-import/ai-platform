@@ -12,5 +12,5 @@ public interface LlmProvider {
      */
     LlmProviderEnum getProviderCode();
 
-    LlmResponse chat(LlmRequest request);
+    LlmResponse chat(String requestId, LlmRequest request);
 }

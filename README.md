@@ -16,6 +16,8 @@ The current milestone is a small, explicit **LLM gateway**. Clients provide a pr
 - Normalized chat request and response objects
 - API keys loaded from environment variables
 - Consistent JSON error responses for invalid requests and provider failures
+- Explicit request IDs propagated through the chat chain and correlated through MDC
+- Human-readable local logs and ECS JSON logs for production
 - React web UI with separate Playground, Analytics, and Request Logs routes
 - MySQL request ledger with filtered, paginated request-log queries
 
@@ -201,6 +203,18 @@ curl --request POST "http://localhost:8080/api/v1/chat/completions" \
 
 Never commit API keys. The YAML configuration stores environment variable names only.
 
+Local logs keep Spring Boot's default console format and add the current request ID. To emit
+ECS-compatible JSON logs for Elasticsearch ingestion, activate the production profile:
+
+```bash
+export SPRING_PROFILES_ACTIVE=prod
+export APP_ENV=prod
+export APP_VERSION=0.0.1
+```
+
+The application writes logs to standard output; a deployment-side agent should collect and ship
+them rather than having the application write directly to Elasticsearch.
+
 ## Tech Stack
 
 - Java 21
@@ -223,7 +237,7 @@ Frontend source lives in `frontend/`. The `src/main/resources/static/` directory
 1. **Gateway resilience**
    Add runtime failover, bounded retries, timeouts, rate limiting, and circuit breaking.
 2. **Observability**
-   Add request IDs, latency metrics, provider-level success rates, and traceable execution records.
+   Add latency metrics, provider-level success rates, and distributed tracing.
 3. **Agent runtime**
    Implement function calling, a tool registry, bounded ReAct loops, step persistence, cancellation, and execution limits.
 4. **Controlled code tools**

@@ -1,5 +1,6 @@
 package org.frostnova.aigateway.provider.provider;
 
+import lombok.extern.slf4j.Slf4j;
 import org.frostnova.aigateway.common.exception.BaseException;
 import org.frostnova.aigateway.common.exception.ErrorCodes;
 import org.frostnova.aigateway.config.AiGatewayProperties;
@@ -19,6 +20,7 @@ import tools.jackson.databind.JsonNode;
 
 import java.util.Map;
 
+@Slf4j
 @Component
 @ConditionalOnProperty(
         prefix = "ai.gateway.providers.groq",
@@ -44,7 +46,7 @@ public class GroqProvider implements LlmProvider {
     }
 
     @Override
-    public LlmResponse chat(LlmRequest request) {
+    public LlmResponse chat(String requestId, LlmRequest request) {
         String apiKey = System.getenv(apiKeyEnv);
         if (apiKey == null || apiKey.isBlank()) {
             throw new BaseException(
@@ -56,6 +58,7 @@ public class GroqProvider implements LlmProvider {
 
         JsonNode responseBody;
         try {
+            log.debug("Calling Groq provider");
             responseBody = restClient.post()
                     .uri("/chat/completions")
                     .contentType(MediaType.APPLICATION_JSON)

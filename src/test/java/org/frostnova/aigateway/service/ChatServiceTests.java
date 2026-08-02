@@ -29,6 +29,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ChatServiceTests {
 
+    private static final String REQUEST_ID = "request-test";
+
     private AiGatewayProperties properties;
     private CapturingProvider geminiProvider;
     private CapturingRequestRecordMapper requestRecordMapper;
@@ -58,9 +60,10 @@ class ChatServiceTests {
         request.setModel("test-model");
         request.setUserMessage("hello");
 
-        LlmResponse response = chatService.executeChat(request);
+        LlmResponse response = chatService.executeChat(REQUEST_ID, request);
 
         assertThat(response.getContent()).isEqualTo("ok");
+        assertThat(geminiProvider.lastRequestId).isEqualTo(REQUEST_ID);
         assertThat(geminiProvider.lastRequest.getModel()).isEqualTo("test-model");
         assertThat(geminiProvider.lastRequest.getMessages())
                 .singleElement()
@@ -71,7 +74,7 @@ class ChatServiceTests {
         assertThat(requestRecordMapper.records)
                 .singleElement()
                 .satisfies(record -> {
-                    assertThat(record.getRequestId()).isNotBlank();
+                    assertThat(record.getRequestId()).isEqualTo(REQUEST_ID);
                     assertThat(record.getProvider()).isEqualTo("gemini");
                     assertThat(record.getModel()).isEqualTo("test-model");
                     assertThat(record.getResultStatus()).isEqualTo(LlmRequestStatus.SUCCESS);
@@ -91,7 +94,7 @@ class ChatServiceTests {
         );
         geminiProvider.failure = failure;
 
-        assertThatThrownBy(() -> chatService.executeChat(request))
+        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, request))
                 .isSameAs(failure);
 
         assertThat(requestRecordMapper.records)
@@ -109,7 +112,7 @@ class ChatServiceTests {
         request.setProvider("gemini");
         request.setModel("unknown-model");
 
-        assertThatThrownBy(() -> chatService.executeChat(request))
+        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, request))
                 .isInstanceOfSatisfying(BaseException.class, exception -> {
                     assertThat(exception.getCode()).isEqualTo(ErrorCodes.UNSUPPORTED_MODEL);
                     assertThat(exception.getMessage())
@@ -124,7 +127,7 @@ class ChatServiceTests {
         request.setProvider("gemini");
         request.setModel(" ");
 
-        assertThatThrownBy(() -> chatService.executeChat(request))
+        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, request))
                 .isInstanceOf(BaseException.class)
                 .hasMessage("Model must not be blank");
     }
@@ -135,7 +138,7 @@ class ChatServiceTests {
         request.setProvider("unknown");
         request.setModel("test-model");
 
-        assertThatThrownBy(() -> chatService.executeChat(request))
+        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, request))
                 .isInstanceOf(BaseException.class)
                 .hasMessage("Unsupported provider: unknown");
     }
@@ -145,7 +148,7 @@ class ChatServiceTests {
         AppChatRequest request = new AppChatRequest();
         request.setModel("test-model");
 
-        assertThatThrownBy(() -> chatService.executeChat(request))
+        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, request))
                 .isInstanceOf(BaseException.class)
                 .hasMessage("Provider must not be blank");
     }
@@ -162,6 +165,7 @@ class ChatServiceTests {
     private static final class CapturingProvider implements LlmProvider {
 
         private final LlmProviderEnum providerCode;
+        private String lastRequestId;
         private LlmRequest lastRequest;
         private RuntimeException failure;
 
@@ -175,7 +179,8 @@ class ChatServiceTests {
         }
 
         @Override
-        public LlmResponse chat(LlmRequest request) {
+        public LlmResponse chat(String requestId, LlmRequest request) {
+            lastRequestId = requestId;
             lastRequest = request;
             if (failure != null) {
                 throw failure;

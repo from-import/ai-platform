@@ -1,5 +1,6 @@
 package org.frostnova.aigateway.provider.provider;
 
+import lombok.extern.slf4j.Slf4j;
 import org.frostnova.aigateway.common.exception.BaseException;
 import org.frostnova.aigateway.common.exception.ErrorCodes;
 import org.frostnova.aigateway.config.AiGatewayProperties;
@@ -20,6 +21,7 @@ import tools.jackson.databind.JsonNode;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 @Component
 @ConditionalOnProperty(
         prefix = "ai.gateway.providers.gemini",
@@ -45,7 +47,7 @@ public class GeminiProvider implements LlmProvider {
     }
 
     @Override
-    public LlmResponse chat(LlmRequest request) {
+    public LlmResponse chat(String requestId, LlmRequest request) {
         String apiKey = System.getenv(apiKeyEnv);
         if (apiKey == null || apiKey.isBlank()) {
             throw new BaseException(
@@ -57,6 +59,7 @@ public class GeminiProvider implements LlmProvider {
 
         JsonNode responseBody;
         try {
+            log.debug("Calling Gemini provider");
             responseBody = restClient.post()
                     .uri("/v1beta/models/{model}:generateContent", request.getModel())
                     .contentType(MediaType.APPLICATION_JSON)
