@@ -1,5 +1,8 @@
 package org.frostnova.aigateway.provider;
 
+import org.frostnova.aigateway.common.exception.BaseException;
+import org.frostnova.aigateway.common.exception.ErrorCodes;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 import java.util.EnumMap;
@@ -16,8 +19,10 @@ public class ProviderRegistry {
         for (LlmProvider provider : providerList) {
             LlmProvider previous = registeredProviders.put(provider.getProviderCode(), provider);
             if (previous != null) {
-                throw new IllegalStateException(
-                        "Duplicate provider registered: " + provider.getProviderCode().getCode()
+                throw new BaseException(
+                        ErrorCodes.GATEWAY_CONFIGURATION_ERROR,
+                        "Duplicate provider registered: " + provider.getProviderCode().getCode(),
+                        HttpStatus.INTERNAL_SERVER_ERROR
                 );
             }
         }
@@ -27,7 +32,11 @@ public class ProviderRegistry {
     public LlmProvider getProvider(LlmProviderEnum providerCode) {
         LlmProvider provider = providers.get(providerCode);
         if (provider == null) {
-            throw new IllegalArgumentException("Unsupported provider: " + providerCode.getCode());
+            throw new BaseException(
+                    ErrorCodes.PROVIDER_UNAVAILABLE,
+                    "Provider is unavailable: " + providerCode.getCode(),
+                    HttpStatus.SERVICE_UNAVAILABLE
+            );
         }
         return provider;
     }

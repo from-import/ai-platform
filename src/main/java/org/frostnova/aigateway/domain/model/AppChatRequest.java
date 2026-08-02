@@ -5,7 +5,12 @@ import lombok.Data;
 @Data
 public class AppChatRequest {
     /**
-     * 具体模型，格式为 provider/model，例如 gemini/gemini-flash-latest
+     * Provider Code，例如 gemini 或 groq
+     */
+    private String provider;
+
+    /**
+     * Provider 上游的具体模型，例如 gemini-flash-latest
      */
     private String model;
 

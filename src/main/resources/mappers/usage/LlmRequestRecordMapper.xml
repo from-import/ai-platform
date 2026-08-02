@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.frostnova.aigateway.usage.mapper.LlmRequestRecordMapper">
+
+    <resultMap id="llmRequestRecordResultMap"
+               type="org.frostnova.aigateway.usage.model.LlmRequestRecord">
+        <id property="id" column="id"/>
+        <result property="requestId" column="request_id"/>
+        <result property="provider" column="provider"/>
+        <result property="model" column="model"/>
+        <result property="resultStatus" column="result_status"/>
+        <result property="promptTokens" column="prompt_tokens"/>
+        <result property="completionTokens" column="completion_tokens"/>
+        <result property="totalTokens" column="total_tokens"/>
+        <result property="latencyMs" column="latency_ms"/>
+        <result property="upstreamStatusCode" column="upstream_status_code"/>
+        <result property="errorCode" column="error_code"/>
+        <result property="errorMessage" column="error_message"/>
+        <result property="requestedAt" column="requested_at"/>
+    </resultMap>
+
+    <resultMap id="usageStatisticsResultMap"
+               type="org.frostnova.aigateway.usage.model.UsageStatistics">
+        <result property="totalRequests" column="total_requests"/>
+        <result property="successfulRequests" column="successful_requests"/>
+        <result property="failedRequests" column="failed_requests"/>
+        <result property="promptTokens" column="prompt_tokens"/>
+        <result property="completionTokens" column="completion_tokens"/>
+        <result property="totalTokens" column="total_tokens"/>
+        <result property="averageLatencyMs" column="average_latency_ms"/>
+    </resultMap>
+
+    <sql id="recordColumns">
+        id,
+        request_id,
+        provider,
+        model,
+        result_status,
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        latency_ms,
+        upstream_status_code,
+        error_code,
+        error_message,
+        requested_at
+    </sql>
+
+    <sql id="recordFilters">
+        <where>
+            <if test="requestId != null">
+                request_id = #{requestId}
+            </if>
+            <if test="provider != null">
+                AND provider = #{provider}
+            </if>
+            <if test="model != null">
+                AND model = #{model}
+            </if>
+            <if test="status != null">
+                AND result_status = #{status}
+            </if>
+            <if test="requestedFrom != null">
+                AND requested_at &gt;= #{requestedFrom}
+            </if>
+            <if test="requestedTo != null">
+                AND requested_at &lt;= #{requestedTo}
+            </if>
+        </where>
+    </sql>
+
+    <insert id="insert"
+            parameterType="org.frostnova.aigateway.usage.model.LlmRequestRecord"
+            useGeneratedKeys="true"
+            keyProperty="id">
+        INSERT INTO llm_request_record (
+            request_id,
+            provider,
+            model,
+            result_status,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            latency_ms,
+            upstream_status_code,
+            error_code,
+            error_message,
+            requested_at
+        ) VALUES (
+            #{requestId},
+            #{provider},
+            #{model},
+            #{resultStatus},
+            #{promptTokens},
+            #{completionTokens},
+            #{totalTokens},
+            #{latencyMs},
+            #{upstreamStatusCode},
+            #{errorCode},
+            #{errorMessage},
+            #{requestedAt}
+        )
+    </insert>
+
+    <select id="findById" resultMap="llmRequestRecordResultMap">
+        SELECT
+        <include refid="recordColumns"/>
+        FROM llm_request_record
+        WHERE id = #{id}
+    </select>
+
+    <select id="findByRequestId" resultMap="llmRequestRecordResultMap">
+        SELECT
+        <include refid="recordColumns"/>
+        FROM llm_request_record
+        WHERE request_id = #{requestId}
+    </select>
+
+    <select id="findAll" resultMap="llmRequestRecordResultMap">
+        SELECT
+        <include refid="recordColumns"/>
+        FROM llm_request_record
+        ORDER BY requested_at DESC, id DESC
+    </select>
+
+    <select id="findPage" resultMap="llmRequestRecordResultMap">
+        SELECT
+        <include refid="recordColumns"/>
+        FROM llm_request_record
+        <include refid="recordFilters"/>
+        ORDER BY requested_at DESC, id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*)
+        FROM llm_request_record
+        <include refid="recordFilters"/>
+    </select>
+
+    <select id="getStatistics" resultMap="usageStatisticsResultMap">
+        SELECT COUNT(*) AS total_requests,
+               COALESCE(SUM(CASE WHEN result_status = 'SUCCESS' THEN 1 ELSE 0 END), 0)
+                   AS successful_requests,
+               COALESCE(SUM(CASE WHEN result_status = 'FAILED' THEN 1 ELSE 0 END), 0)
+                   AS failed_requests,
+               COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+               COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+               COALESCE(
+                   SUM(COALESCE(total_tokens, COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0))),
+                   0
+               ) AS total_tokens,
+               COALESCE(AVG(latency_ms), 0) AS average_latency_ms
+        FROM llm_request_record
+    </select>
+
+    <update id="update"
+            parameterType="org.frostnova.aigateway.usage.model.LlmRequestRecord">
+        UPDATE llm_request_record
+        SET request_id = #{requestId},
+            provider = #{provider},
+            model = #{model},
+            result_status = #{resultStatus},
+            prompt_tokens = #{promptTokens},
+            completion_tokens = #{completionTokens},
+            total_tokens = #{totalTokens},
+            latency_ms = #{latencyMs},
+            upstream_status_code = #{upstreamStatusCode},
+            error_code = #{errorCode},
+            error_message = #{errorMessage},
+            requested_at = #{requestedAt}
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM llm_request_record
+        WHERE id = #{id}
+    </delete>
+
+</mapper>

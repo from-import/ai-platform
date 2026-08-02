@@ -1,7 +1,7 @@
 # Multi-Provider LLM Gateway 需求文档
 
-> 文档版本：2.0  
-> 更新日期：2026-08-01  
+> 文档版本：2.1
+> 更新日期：2026-08-02
 > 原则：代码只表达已经确认的需求；未来能力保留在 Backlog，不提前进入生产模型。
 
 ## 1. 项目定位
@@ -9,10 +9,10 @@
 本项目提供一个统一的 Chat API。调用方明确指定具体模型，网关负责：
 
 - 校验模型是否允许调用。
-- 根据 `provider/model` 中的 Provider 前缀选择协议 Adapter。
+- 根据请求中明确的 `provider` 选择协议 Adapter。
 - 将统一请求转换为 Gemini、Groq 等 Provider 的原生协议。
 - 将 Provider 响应转换为统一响应。
-- 在后续里程碑中增加鉴权、用量治理、可靠性和可观测性。
+- 在后续里程碑中增加用量治理、可靠性和可观测性。
 
 项目当前不提供虚拟模型别名，也不替调用方选择模型。
 
@@ -27,16 +27,13 @@ Content-Type: application/json
 
 ```json
 {
-  "model": "gemini/gemini-flash-latest",
+  "provider": "gemini",
+  "model": "gemini-flash-latest",
   "userMessage": "Explain how DNS works"
 }
 ```
 
-模型字段必须使用：
-
-```text
-provider/upstream-model
-```
+`provider` 是网关 Provider Code，`model` 是该 Provider 上游的具体模型名。两者是独立字段，不使用复合字符串。
 
 响应：
 
@@ -49,20 +46,39 @@ provider/upstream-model
 }
 ```
 
-### 2.2 错误语义
+### 2.2 模型发现
+
+```http
+GET /api/v1/models
+```
+
+接口只返回已启用 Provider 的白名单模型：
+
+```json
+[
+  {
+    "provider": "gemini",
+    "model": "gemini-flash-latest"
+  }
+]
+```
+
+Web UI 在启动时调用该接口生成模型选项，不在 HTML 中维护第二份模型列表。该能力不包含 Provider 自动发现或运行时热更新。
+
+### 2.3 错误语义
 
 | 场景 | HTTP 状态 | 错误类型 |
 |---|---:|---|
+| `provider` 为空 | 400 | Invalid request |
+| Provider 不存在 | 400 | Unsupported provider |
 | `model` 为空 | 400 | Invalid request |
-| 模型格式不是 `provider/model` | 400 | Invalid request |
-| 模型不在白名单 | 400 | Unsupported model |
-| Provider 前缀不存在 | 400 | Unsupported provider |
+| 模型不在该 Provider 白名单 | 400 | Unsupported model |
 | Provider 返回错误 | 502 | Provider error |
 | 未预期异常 | 500 | Internal error |
 
 ## 3. 配置模型
 
-### 3.1 Provider 连接配置
+### 3.1 Provider 配置
 
 一个 Provider 当前只有一套连接配置：
 
@@ -74,11 +90,15 @@ ai:
         base-url: https://generativelanguage.googleapis.com
         api-key-env: GEMINI_API_KEY
         enabled: true
+        supported-models:
+          - gemini-flash-latest
 
       groq:
         base-url: https://api.groq.com/openai/v1
         api-key-env: GROQ_API_KEY
         enabled: true
+        supported-models:
+          - llama-3.3-70b-versatile
 ```
 
 Provider 配置只描述：
@@ -86,6 +106,7 @@ Provider 配置只描述：
 - 如何连接 Provider。
 - 从哪个环境变量读取密钥。
 - Provider 是否启用。
+- 该 Provider 允许调用哪些上游模型。
 
 当前不配置默认模型、endpoint、优先级、retry 或 fallback。
 
@@ -94,17 +115,24 @@ Provider 配置只描述：
 ```yaml
 ai:
   gateway:
-    supported-models:
-      - gemini/gemini-flash-latest
-      - groq/llama-3.3-70b-versatile
+    providers:
+      gemini:
+        supported-models:
+          - gemini-flash-latest
+
+      groq:
+        supported-models:
+          - llama-3.3-70b-versatile
 ```
 
 同一 Provider 上线协议兼容的新模型时，只需要增加配置并重启应用，不修改 Java：
 
 ```yaml
-supported-models:
-  - gemini/gemini-flash-latest
-  - gemini/new-model
+providers:
+  gemini:
+    supported-models:
+      - gemini-flash-latest
+      - new-model
 ```
 
 新增协议不同的 Provider 时，必须增加新的 `LlmProvider` Adapter。
@@ -115,9 +143,8 @@ supported-models:
 flowchart LR
     Client["Client"] --> Controller["ChatController"]
     Controller --> Service["ChatService"]
-    Service --> Allowlist["Supported-model validation"]
-    Allowlist --> Parse["Parse provider/model"]
-    Parse --> Registry["ProviderRegistry"]
+    Service --> Allowlist["Validate provider and model"]
+    Allowlist --> Registry["ProviderRegistry"]
     Registry --> Gemini["GeminiProvider"]
     Registry --> Groq["GroqProvider"]
     Gemini --> Result["LlmResponse"]
@@ -128,9 +155,8 @@ flowchart LR
 
 负责：
 
-- 校验模型字符串。
-- 校验模型白名单。
-- 解析 Provider 前缀和上游模型 ID。
+- 校验 Provider Code。
+- 校验模型是否在该 Provider 的白名单中。
 - 创建统一 `LlmRequest`。
 - 从 Registry 查找 Adapter。
 - 编排一次同步调用。
@@ -179,14 +205,15 @@ public interface LlmProvider {
 
 - [x] Gemini 同步 Chat Adapter。
 - [x] Groq 同步 Chat Adapter。
-- [x] `provider/model` 精确模型选择。
+- [x] 显式 `provider` + `model` 精确模型选择。
 - [x] YAML 模型白名单。
 - [x] Provider 连接配置。
+- [x] 基于 YAML 配置的模型发现 API。
+- [x] Web UI 动态加载模型列表。
 - [x] 不可变 Provider Registry。
 - [x] 统一请求和响应。
 - [x] 统一异常响应。
-- [x] 应用凭证签发、哈希、查询和吊销。
-- [x] 简单 Web 演示页面。
+- [x] React Web UI：Playground、Analytics 和 Request Logs。
 
 ### 5.2 明确不支持
 
@@ -198,7 +225,6 @@ public interface LlmProvider {
 - Streaming。
 - Tool calling。
 - Agent Runtime。
-- Scatter-gather 异步任务。
 
 ## 6. 近期 Backlog
 
@@ -210,23 +236,15 @@ public interface LlmProvider {
 - [ ] 增加配置启动校验：Provider base URL、Secret 名称、白名单格式。
 - [ ] 确保 README 只描述测试验证过的行为。
 
-### Milestone 1：请求认证
+### Milestone 1：用量治理
 
-- [ ] Chat API 要求 Bearer API Key。
-- [ ] 从 API Key 哈希查询 `AppCredential`。
-- [ ] 拒绝 `SUSPENDED` 和 `REVOKED` 凭证。
-- [ ] 使用 `allowed_models` 校验应用模型权限。
-- [ ] API Key 不进入日志、错误或 trace。
-
-### Milestone 2：用量治理
-
-- [ ] Redis 应用级请求限流。
-- [ ] 每日 token 配额。
-- [ ] 持久化 request usage ledger。
+- [x] 持久化 request usage ledger。
+- [x] 按 Provider、模型、状态和时间筛选请求记录。
+- [x] MySQL 分页查询和全局用量统计。
 - [ ] 区分 Provider 报告、估算和未知 token。
-- [ ] 默认不存储 prompt 和完整回答。
+- [x] 默认不存储 prompt 和完整回答。
 
-### Milestone 3：可靠性
+### Milestone 2：可靠性
 
 精确模型请求默认不允许静默切换为其他模型。
 
@@ -240,7 +258,7 @@ public interface LlmProvider {
 
 跨模型 fallback 只有在未来引入明确的虚拟模型需求后才能实现。
 
-### Milestone 4：可观测性
+### Milestone 3：可观测性
 
 - [ ] Request ID。
 - [ ] 结构化日志。
@@ -249,7 +267,7 @@ public interface LlmProvider {
 - [ ] Provider 成功率和延迟。
 - [ ] Token 与成本统计。
 
-### Milestone 5：工程交付
+### Milestone 4：工程交付
 
 - [ ] Docker Compose：应用、MySQL、Redis、Prometheus、Grafana。
 - [ ] CI：编译、测试和镜像构建。

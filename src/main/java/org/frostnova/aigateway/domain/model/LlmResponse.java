@@ -15,12 +15,17 @@ public class LlmResponse {
     /**
      * input token消耗
      */
-    private int promptTokens;
+    private Integer promptTokens;
 
     /**
      * output token消耗
      */
-    private int completionTokens;
+    private Integer completionTokens;
+
+    /**
+     * Provider 报告的总 Token 消耗
+     */
+    private Integer totalTokens;
 
     /**
      * 模型回答提供方name

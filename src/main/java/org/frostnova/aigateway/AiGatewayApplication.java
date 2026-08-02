@@ -6,7 +6,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @Slf4j
-@MapperScan("org.frostnova.aigateway.credential.mapper")
+@MapperScan("org.frostnova.aigateway.usage.mapper")
 @SpringBootApplication
 public class AiGatewayApplication {
 

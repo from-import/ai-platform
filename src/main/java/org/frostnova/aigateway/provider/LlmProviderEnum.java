@@ -1,6 +1,8 @@
 package org.frostnova.aigateway.provider;
 
 import lombok.Getter;
+import org.frostnova.aigateway.common.exception.BaseException;
+import org.frostnova.aigateway.common.exception.ErrorCodes;
 
 import java.util.HashMap;
 import java.util.Locale;
@@ -27,10 +29,15 @@ public enum LlmProviderEnum {
         }
     }
 
-    public static LlmProviderEnum getProviderByCode(String code) {
-        if (code == null) {
-            return null;
+    public static LlmProviderEnum requireByCode(String code) {
+        if (code == null || code.isBlank()) {
+            throw new BaseException(ErrorCodes.INVALID_REQUEST, "Provider must not be blank");
         }
-        return codeMap.get(code.toLowerCase(Locale.ROOT));
+
+        LlmProviderEnum provider = codeMap.get(code.toLowerCase(Locale.ROOT));
+        if (provider == null) {
+            throw new BaseException(ErrorCodes.UNSUPPORTED_PROVIDER, "Unsupported provider: " + code);
+        }
+        return provider;
     }
 }

@@ -2,7 +2,7 @@
 
 A Spring Boot backend that exposes one chat API and routes requests to different LLM providers through a normalized request/response model.
 
-The current milestone is a small, explicit **LLM gateway**. Clients select a concrete model using `provider/model`, while the gateway normalizes provider protocols and keeps upstream credentials on the server.
+The current milestone is a small, explicit **LLM gateway**. Clients provide a provider and one of its concrete models, while the gateway normalizes provider protocols and keeps upstream credentials on the server.
 
 ## What Works Today
 
@@ -11,13 +11,13 @@ The current milestone is a small, explicit **LLM gateway**. Clients select a con
 - Provider-neutral interface with Gemini and Groq adapters
 - Immutable runtime provider registry
 - Configuration-driven provider connections and supported-model allowlist
-- Request-level concrete model selection using `provider/model`
+- Read-only model discovery API backed by the gateway configuration
+- Request-level explicit provider and concrete model selection
 - Normalized chat request and response objects
 - API keys loaded from environment variables
 - Consistent JSON error responses for invalid requests and provider failures
-- Minimal web UI for sending prompts and inspecting responses and token usage
-- MySQL persistence for application credentials using MyBatis XML mappers
-- API key issuance, SHA-256 hashing, active-key lookup, and credential revocation
+- React web UI with separate Playground, Analytics, and Request Logs routes
+- MySQL request ledger with filtered, paginated request-log queries
 
 ## Request Flow
 
@@ -25,7 +25,7 @@ The current milestone is a small, explicit **LLM gateway**. Clients select a con
 flowchart LR
     Client["Web UI / API Client"] --> API["POST /api/v1/chat/completions"]
     API --> Service["ChatService"]
-    Service --> Model["Validate provider/model"]
+    Service --> Model["Validate provider and model"]
     Model --> Registry["ProviderRegistry"]
     Registry --> Gemini["Gemini Provider"]
     Registry --> Groq["Groq Provider"]
@@ -33,7 +33,7 @@ flowchart LR
     Groq --> Response
 ```
 
-`ChatService` validates the requested model, parses its provider prefix, builds a provider-neutral `LlmRequest`, and delegates it to the registered provider implementation. Provider-specific payloads and response parsing stay inside each adapter.
+`ChatService` validates the requested provider and checks the model against that provider's allowlist. It then builds a provider-neutral `LlmRequest` and delegates it to the registered provider implementation. Provider-specific payloads and response parsing stay inside each adapter.
 
 ## API
 
@@ -46,7 +46,8 @@ Content-Type: application/json
 
 ```json
 {
-  "model": "gemini/gemini-flash-latest",
+  "provider": "gemini",
+  "model": "gemini-flash-latest",
   "userMessage": "Explain how AI works in a few words"
 }
 ```
@@ -64,14 +65,55 @@ Content-Type: application/json
 
 Token values depend on whether the selected provider returns usage metadata.
 
+### Model Discovery
+
+```http
+GET /api/v1/models
+```
+
+```json
+[
+  {
+    "provider": "gemini",
+    "model": "gemini-flash-latest"
+  },
+  {
+    "provider": "groq",
+    "model": "llama-3.3-70b-versatile"
+  }
+]
+```
+
+The response above is abbreviated. The endpoint exposes every model from enabled provider configurations, and the demo UI loads it at startup instead of maintaining a separate hardcoded model list.
+
+### Usage Analytics
+
+```http
+GET /api/v1/usage/statistics
+GET /api/v1/usage/requests?page=1&pageSize=20&provider=gemini&status=FAILED
+```
+
+The request log endpoint supports these optional filters:
+
+- `requestId`: exact request ID
+- `provider` and `model`: exact provider/model pair
+- `status`: `SUCCESS` or `FAILED`
+- `requestedFrom` and `requestedTo`: ISO-8601 local date-time boundaries
+- `page`: one-based page number
+- `pageSize`: number of rows from 1 to 100
+
+The response contains `items`, `page`, `pageSize`, `totalItems`, and `totalPages`. Filtering and pagination run in MySQL rather than loading the complete request ledger into application memory.
+
 ## Supported Models
 
-Clients select a concrete model using the `provider/model` format. The current allowlist is:
+Clients provide the provider and model as separate fields. The current allowlist is:
 
-- `gemini/gemini-flash-latest`
-- `groq/llama-3.3-70b-versatile`
+- Gemini: `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-pro-preview`, `gemini-3.1-flash-lite`, `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-flash-latest`
+- Groq: `llama-3.3-70b-versatile`, `llama-3.1-8b-instant`, `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `groq/compound`, `groq/compound-mini`, `qwen/qwen3.6-27b`
 
-Provider connections and the model allowlist live in `src/main/resources/application.yml`. Adding a model that uses an existing provider protocol requires configuration only; adding a provider with a new protocol requires a new `LlmProvider` adapter.
+Only text-generating models compatible with the gateway's current chat endpoints are included. Audio, image, embedding, and moderation-specific models require different request and response adapters.
+
+Each provider's connection and model allowlist live together in `src/main/resources/application.yml`. Adding a model that uses an existing provider protocol requires configuration and an application restart; the model discovery API and demo UI then expose it automatically. Adding a provider with a new protocol requires a new `LlmProvider` adapter.
 
 ## Run Locally
 
@@ -79,13 +121,15 @@ Prerequisites:
 
 - Java 21+
 - Maven 3.9+
+- Node.js 20.19+
+- pnpm 11+
 - MySQL 8.4+
 - A Gemini API key and/or Groq API key
 
-Create the local database and credential table:
+Create the local request-ledger table:
 
 ```bash
-mysql -u root -p < database/mysql/001_create_app_credential.sql
+mysql -u root -p < database/mysql/001_create_llm_request_record.sql
 ```
 
 Create a dedicated application user from the MySQL console:
@@ -111,14 +155,33 @@ export GEMINI_API_KEY="your-gemini-api-key"
 export GROQ_API_KEY="your-groq-api-key"
 ```
 
-Run the tests and start the application:
+Install the frontend dependencies once:
 
 ```bash
-mvn clean test
+cd frontend
+pnpm install
+cd ..
+```
+
+For frontend development, start Spring Boot from IntelliJ IDEA and run Vite in a second terminal:
+
+```bash
+cd frontend
+pnpm dev
+```
+
+Open `http://localhost:5173`. Vite proxies `/api` calls to Spring Boot on port `8080`.
+
+To serve the frontend from Spring Boot instead, build the React application into the backend static resources and then start the application:
+
+```bash
+cd frontend
+pnpm build:spring
+cd ..
 mvn spring-boot:run
 ```
 
-Open the demo UI:
+Open the bundled UI:
 
 ```text
 http://localhost:8080/
@@ -130,7 +193,8 @@ Or call the API directly:
 curl --request POST "http://localhost:8080/api/v1/chat/completions" \
   --header "Content-Type: application/json" \
   --data '{
-    "model": "gemini/gemini-flash-latest",
+    "provider": "gemini",
+    "model": "gemini-flash-latest",
     "userMessage": "Explain how AI works in a few words"
   }'
 ```
@@ -147,19 +211,22 @@ Never commit API keys. The YAML configuration stores environment variable names 
 - MyBatis 4 with XML mappers
 - H2 for persistence integration tests
 - Maven
-- Vanilla HTML/CSS/JavaScript demo UI
+- React 19
+- TypeScript
+- Vite
+- React Router
+
+Frontend source lives in `frontend/`. The `src/main/resources/static/` directory contains generated production assets and should not be edited by hand. See `frontend/README.md` for the development and single-JAR build workflows.
 
 ## Roadmap
 
-1. **Request authentication and usage accounting**
-   Authenticate gateway requests with issued API keys, then persist request records, quotas, and token usage.
-2. **Gateway resilience**
+1. **Gateway resilience**
    Add runtime failover, bounded retries, timeouts, rate limiting, and circuit breaking.
-3. **Observability**
+2. **Observability**
    Add request IDs, latency metrics, provider-level success rates, and traceable execution records.
-4. **Agent runtime**
+3. **Agent runtime**
    Implement function calling, a tool registry, bounded ReAct loops, step persistence, cancellation, and execution limits.
-5. **Controlled code tools**
+4. **Controlled code tools**
    Add workspace allowlists, path validation, file-size limits, timeouts, and explicit tool permissions before enabling code or file access.
 
 ## Status
