@@ -30,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ChatServiceTests {
 
     private static final String REQUEST_ID = "request-test";
+    private static final long USER_ID = 42L;
 
     private AiGatewayProperties properties;
     private CapturingProvider geminiProvider;
@@ -60,7 +61,7 @@ class ChatServiceTests {
         request.setModel("test-model");
         request.setUserMessage("hello");
 
-        LlmResponse response = chatService.executeChat(REQUEST_ID, request);
+        LlmResponse response = chatService.executeChat(REQUEST_ID, USER_ID, request);
 
         assertThat(response.getContent()).isEqualTo("ok");
         assertThat(geminiProvider.lastRequestId).isEqualTo(REQUEST_ID);
@@ -75,6 +76,7 @@ class ChatServiceTests {
                 .singleElement()
                 .satisfies(record -> {
                     assertThat(record.getRequestId()).isEqualTo(REQUEST_ID);
+                    assertThat(record.getUserId()).isEqualTo(USER_ID);
                     assertThat(record.getProvider()).isEqualTo("gemini");
                     assertThat(record.getModel()).isEqualTo("test-model");
                     assertThat(record.getResultStatus()).isEqualTo(LlmRequestStatus.SUCCESS);
@@ -94,7 +96,7 @@ class ChatServiceTests {
         );
         geminiProvider.failure = failure;
 
-        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, request))
+        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, USER_ID, request))
                 .isSameAs(failure);
 
         assertThat(requestRecordMapper.records)
@@ -112,7 +114,7 @@ class ChatServiceTests {
         request.setProvider("gemini");
         request.setModel("unknown-model");
 
-        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, request))
+        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, USER_ID, request))
                 .isInstanceOfSatisfying(BaseException.class, exception -> {
                     assertThat(exception.getCode()).isEqualTo(ErrorCodes.UNSUPPORTED_MODEL);
                     assertThat(exception.getMessage())
@@ -127,7 +129,7 @@ class ChatServiceTests {
         request.setProvider("gemini");
         request.setModel(" ");
 
-        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, request))
+        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, USER_ID, request))
                 .isInstanceOf(BaseException.class)
                 .hasMessage("Model must not be blank");
     }
@@ -138,7 +140,7 @@ class ChatServiceTests {
         request.setProvider("unknown");
         request.setModel("test-model");
 
-        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, request))
+        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, USER_ID, request))
                 .isInstanceOf(BaseException.class)
                 .hasMessage("Unsupported provider: unknown");
     }
@@ -148,7 +150,7 @@ class ChatServiceTests {
         AppChatRequest request = new AppChatRequest();
         request.setModel("test-model");
 
-        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, request))
+        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, USER_ID, request))
                 .isInstanceOf(BaseException.class)
                 .hasMessage("Provider must not be blank");
     }
@@ -228,7 +230,7 @@ class ChatServiceTests {
         }
 
         @Override
-        public UsageStatistics getStatistics() {
+        public UsageStatistics getStatistics(Long userId) {
             throw new UnsupportedOperationException();
         }
 

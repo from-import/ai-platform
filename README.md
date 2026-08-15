@@ -20,6 +20,9 @@ The current milestone is a small, explicit **LLM gateway**. Clients provide a pr
 - Human-readable local logs and ECS JSON logs for production
 - React web UI with separate Playground, Analytics, and Request Logs routes
 - MySQL request ledger with filtered, paginated request-log queries
+- Username/password registration and login with BCrypt password hashing
+- Revocable Bearer sessions backed by hashed tokens in MySQL
+- Authentication protection for all gateway and usage APIs
 
 ## Request Flow
 
@@ -105,6 +108,37 @@ The request log endpoint supports these optional filters:
 - `pageSize`: number of rows from 1 to 100
 
 The response contains `items`, `page`, `pageSize`, `totalItems`, and `totalPages`. Filtering and pagination run in MySQL rather than loading the complete request ledger into application memory.
+Usage data is scoped by the authenticated user: `USER` accounts only see their own request records and
+statistics, while `ADMIN` accounts see the complete ledger, including historical records without an owner.
+
+### Authentication
+
+Create a local account, sign in, inspect the current user, and revoke the session with:
+
+```http
+POST /api/v1/auth/register
+POST /api/v1/auth/login
+GET  /api/v1/auth/me
+POST /api/v1/auth/logout
+```
+
+Registration accepts `username`, `password`, and an optional `displayName`. Login returns an opaque
+Bearer token. Only the token's SHA-256 digest is stored in MySQL, and passwords are stored as BCrypt
+hashes. Send the raw token on protected requests:
+
+```http
+Authorization: Bearer <session-token>
+```
+
+All `/api/**` endpoints require authentication except registration and login. Public registration is
+enabled by default for local development and disabled by default in the production profile. Set
+`AUTH_REGISTRATION_ENABLED=true` only when a production environment should allow account creation.
+Session lifetime defaults to 12 hours and can be changed with `AUTH_SESSION_TTL`, for example `24h`.
+New registrations always receive the `USER` role. Promote a trusted account from the MySQL console:
+
+```sql
+UPDATE app_user SET role = 'ADMIN' WHERE username = 'admin';
+```
 
 ## Supported Models
 
@@ -128,10 +162,12 @@ Prerequisites:
 - MySQL 8.4+
 - A Gemini API key and/or Groq API key
 
-Create the local request-ledger table:
+Create the local database tables in migration order:
 
 ```bash
 mysql -u root -p < database/mysql/001_create_llm_request_record.sql
+mysql -u root -p < database/mysql/002_create_auth_tables.sql
+mysql -u root -p < database/mysql/003_add_user_role_and_request_owner.sql
 ```
 
 Create a dedicated application user from the MySQL console:
@@ -155,6 +191,7 @@ export AI_PLATFORM_DB_USERNAME="ai_platform_app"
 export AI_PLATFORM_DB_PASSWORD="your-local-database-password"
 export GEMINI_API_KEY="your-gemini-api-key"
 export GROQ_API_KEY="your-groq-api-key"
+export AUTH_SESSION_TTL="12h"
 ```
 
 Install the frontend dependencies once:
@@ -194,6 +231,7 @@ Or call the API directly:
 ```bash
 curl --request POST "http://localhost:8080/api/v1/chat/completions" \
   --header "Content-Type: application/json" \
+  --header "Authorization: Bearer ${AI_PLATFORM_TOKEN}" \
   --data '{
     "provider": "gemini",
     "model": "gemini-flash-latest",

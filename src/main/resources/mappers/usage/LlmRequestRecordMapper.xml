@@ -7,6 +7,7 @@
     <resultMap id="llmRequestRecordResultMap"
                type="org.frostnova.aigateway.usage.model.LlmRequestRecord">
         <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
         <result property="requestId" column="request_id"/>
         <result property="provider" column="provider"/>
         <result property="model" column="model"/>
@@ -34,6 +35,7 @@
 
     <sql id="recordColumns">
         id,
+        user_id,
         request_id,
         provider,
         model,
@@ -50,8 +52,11 @@
 
     <sql id="recordFilters">
         <where>
+            <if test="userId != null">
+                user_id = #{userId}
+            </if>
             <if test="requestId != null">
-                request_id = #{requestId}
+                AND request_id = #{requestId}
             </if>
             <if test="provider != null">
                 AND provider = #{provider}
@@ -76,6 +81,7 @@
             useGeneratedKeys="true"
             keyProperty="id">
         INSERT INTO llm_request_record (
+            user_id,
             request_id,
             provider,
             model,
@@ -89,6 +95,7 @@
             error_message,
             requested_at
         ) VALUES (
+            #{userId},
             #{requestId},
             #{provider},
             #{model},
@@ -154,12 +161,18 @@
                ) AS total_tokens,
                COALESCE(AVG(latency_ms), 0) AS average_latency_ms
         FROM llm_request_record
+        <where>
+            <if test="userId != null">
+                user_id = #{userId}
+            </if>
+        </where>
     </select>
 
     <update id="update"
             parameterType="org.frostnova.aigateway.usage.model.LlmRequestRecord">
         UPDATE llm_request_record
-        SET request_id = #{requestId},
+        SET user_id = #{userId},
+            request_id = #{requestId},
             provider = #{provider},
             model = #{model},
             result_status = #{resultStatus},

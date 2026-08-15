@@ -1,5 +1,7 @@
 package org.frostnova.aigateway.usage.controller;
 
+import org.frostnova.aigateway.auth.model.AuthPrincipal;
+import org.frostnova.aigateway.auth.web.AuthInterceptor;
 import org.frostnova.aigateway.common.exception.BaseException;
 import org.frostnova.aigateway.common.exception.ErrorCodes;
 import org.frostnova.aigateway.usage.model.LlmRequestRecordPage;
@@ -9,6 +11,7 @@ import org.frostnova.aigateway.usage.service.LlmRequestRecordService;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -26,8 +29,11 @@ public class UsageController {
     }
 
     @GetMapping("/statistics")
-    public UsageStatistics getStatistics() {
-        return requestRecordService.getStatistics();
+    public UsageStatistics getStatistics(
+            @RequestAttribute(AuthInterceptor.AUTH_PRINCIPAL_ATTRIBUTE)
+            AuthPrincipal principal
+    ) {
+        return requestRecordService.getStatistics(principal);
     }
 
     @GetMapping("/requests")
@@ -43,9 +49,12 @@ public class UsageController {
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
             LocalDateTime requestedTo,
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int pageSize
+            @RequestParam(defaultValue = "20") int pageSize,
+            @RequestAttribute(AuthInterceptor.AUTH_PRINCIPAL_ATTRIBUTE)
+            AuthPrincipal principal
     ) {
         return requestRecordService.getRequestRecords(
+                principal,
                 requestId,
                 provider,
                 model,

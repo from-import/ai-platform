@@ -2,11 +2,16 @@ import type {
   ApiErrorPayload,
   ChatRequest,
   ChatResponse,
+  LoginRequest,
+  LoginResponse,
   ModelInfo,
+  RegisterRequest,
   RequestRecordPage,
   RequestRecordQuery,
   UsageStatistics,
+  UserInfo,
 } from "./types";
+import { clearAuthSession, getAuthToken } from "../auth/session";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -57,10 +62,20 @@ function notifyApiErrorListeners(): void {
   apiErrorListeners.forEach((listener) => listener());
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  options?: RequestInit,
+  publishErrors = true,
+): Promise<T> {
+  const headers = new Headers(options?.headers);
+  const token = getAuthToken();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
   let response: Response;
   try {
-    response = await fetch(path, options);
+    response = await fetch(path, { ...options, headers });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       throw error;
@@ -69,7 +84,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       code: "NETWORK_ERROR",
       message: "Unable to reach the AI Platform service",
     });
-    publishApiError(apiError);
+    if (publishErrors) {
+      publishApiError(apiError);
+    }
     throw apiError;
   }
 
@@ -81,11 +98,40 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       code: errorPayload.code || "REQUEST_FAILED",
       message: errorPayload.message || `Request failed with HTTP ${response.status}`,
     });
-    publishApiError(apiError);
+    if (response.status === 401) {
+      clearAuthSession();
+    }
+    if (publishErrors) {
+      publishApiError(apiError);
+    }
     throw apiError;
   }
 
   return payload as T;
+}
+
+export function login(loginRequest: LoginRequest): Promise<LoginResponse> {
+  return request<LoginResponse>("/api/v1/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(loginRequest),
+  }, false);
+}
+
+export function register(registerRequest: RegisterRequest): Promise<UserInfo> {
+  return request<UserInfo>("/api/v1/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(registerRequest),
+  }, false);
+}
+
+export function getCurrentUser(signal?: AbortSignal): Promise<UserInfo> {
+  return request<UserInfo>("/api/v1/auth/me", { signal }, false);
+}
+
+export function logout(): Promise<void> {
+  return request<void>("/api/v1/auth/logout", { method: "POST" }, false);
 }
 
 export function listModels(signal?: AbortSignal): Promise<ModelInfo[]> {

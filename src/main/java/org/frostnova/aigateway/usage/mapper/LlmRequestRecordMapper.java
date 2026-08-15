@@ -21,7 +21,7 @@ public interface LlmRequestRecordMapper {
 
     long count(LlmRequestRecordQuery query);
 
-    UsageStatistics getStatistics();
+    UsageStatistics getStatistics(@Param("userId") Long userId);
 
     int update(LlmRequestRecord record);
 

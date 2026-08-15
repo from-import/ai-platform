@@ -16,6 +16,10 @@ logging:
   pattern:
     correlation: "[requestId=%X{requestId:-}] "
 
+auth:
+  registration-enabled: ${AUTH_REGISTRATION_ENABLED:true}
+  session-ttl: ${AUTH_SESSION_TTL:12h}
+
 ai:
   gateway:
     providers:

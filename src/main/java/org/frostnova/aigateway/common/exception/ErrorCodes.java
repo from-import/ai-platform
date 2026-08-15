@@ -8,6 +8,10 @@ public final class ErrorCodes {
     public static final String PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE";
     public static final String GATEWAY_CONFIGURATION_ERROR = "GATEWAY_CONFIGURATION_ERROR";
     public static final String LLM_PROVIDER_ERROR = "LLM_PROVIDER_ERROR";
+    public static final String AUTHENTICATION_REQUIRED = "AUTHENTICATION_REQUIRED";
+    public static final String INVALID_CREDENTIALS = "INVALID_CREDENTIALS";
+    public static final String USERNAME_ALREADY_EXISTS = "USERNAME_ALREADY_EXISTS";
+    public static final String REGISTRATION_DISABLED = "REGISTRATION_DISABLED";
     public static final String RESOURCE_NOT_FOUND = "RESOURCE_NOT_FOUND";
     public static final String INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR";
 

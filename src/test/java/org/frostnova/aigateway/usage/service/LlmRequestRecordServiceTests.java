@@ -1,5 +1,7 @@
 package org.frostnova.aigateway.usage.service;
 
+import org.frostnova.aigateway.auth.model.AuthPrincipal;
+import org.frostnova.aigateway.auth.model.UserRole;
 import org.frostnova.aigateway.domain.model.LlmResponse;
 import org.frostnova.aigateway.usage.mapper.LlmRequestRecordMapper;
 import org.frostnova.aigateway.usage.model.LlmRequestRecord;
@@ -23,6 +25,8 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 
 class LlmRequestRecordServiceTests {
 
+    private static final long USER_ID = 42L;
+
     private CapturingRequestRecordMapper mapper;
     private LlmRequestRecordService service;
 
@@ -41,6 +45,7 @@ class LlmRequestRecordServiceTests {
         LocalDateTime requestedAt = LocalDateTime.of(2026, 8, 2, 12, 0);
 
         service.recordSuccess(
+                USER_ID,
                 "request-success",
                 "gemini",
                 "gemini-flash-latest",
@@ -51,6 +56,7 @@ class LlmRequestRecordServiceTests {
 
         LlmRequestRecord record = capturedRecord();
         assertThat(record.getResultStatus()).isEqualTo(LlmRequestStatus.SUCCESS);
+        assertThat(record.getUserId()).isEqualTo(USER_ID);
         assertThat(record.getPromptTokens()).isEqualTo(12);
         assertThat(record.getCompletionTokens()).isEqualTo(8);
         assertThat(record.getTotalTokens()).isEqualTo(20);
@@ -70,6 +76,7 @@ class LlmRequestRecordServiceTests {
         );
 
         service.recordFailure(
+                USER_ID,
                 "request-failed",
                 "groq",
                 "llama-3.3-70b-versatile",
@@ -91,6 +98,7 @@ class LlmRequestRecordServiceTests {
         mapper.failOnInsert = true;
 
         assertThatCode(() -> service.recordSuccess(
+                USER_ID,
                 "request-success",
                 "gemini",
                 "gemini-flash-latest",
@@ -114,6 +122,7 @@ class LlmRequestRecordServiceTests {
         mapper.totalCount = 41;
 
         LlmRequestRecordPage result = service.getRequestRecords(
+                principal(UserRole.USER),
                 " request-page ",
                 "gemini",
                 "gemini-3.6-flash",
@@ -128,8 +137,27 @@ class LlmRequestRecordServiceTests {
         assertThat(result.totalItems()).isEqualTo(41);
         assertThat(result.totalPages()).isEqualTo(3);
         assertThat(mapper.lastQuery.requestId()).isEqualTo("request-page");
+        assertThat(mapper.lastQuery.userId()).isEqualTo(USER_ID);
         assertThat(mapper.lastQuery.offset()).isEqualTo(40);
         assertThat(mapper.lastQuery.limit()).isEqualTo(20);
+    }
+
+    @Test
+    void scopesStatisticsToUsersButAllowsAdministratorsToViewAll() {
+        mapper.statistics = new UsageStatistics();
+
+        service.getStatistics(principal(UserRole.USER));
+        assertThat(mapper.lastStatisticsUserId).isEqualTo(USER_ID);
+
+        service.getStatistics(principal(UserRole.ADMIN));
+        assertThat(mapper.lastStatisticsUserId).isNull();
+    }
+
+    private AuthPrincipal principal(UserRole role) {
+        AuthPrincipal principal = new AuthPrincipal();
+        principal.setUserId(USER_ID);
+        principal.setRole(role);
+        return principal;
     }
 
     private LlmRequestRecord capturedRecord() {
@@ -144,6 +172,8 @@ class LlmRequestRecordServiceTests {
         private List<LlmRequestRecord> pageRecords = List.of();
         private long totalCount;
         private LlmRequestRecordQuery lastQuery;
+        private UsageStatistics statistics;
+        private Long lastStatisticsUserId;
 
         @Override
         public int insert(LlmRequestRecord record) {
@@ -182,8 +212,9 @@ class LlmRequestRecordServiceTests {
         }
 
         @Override
-        public UsageStatistics getStatistics() {
-            throw new UnsupportedOperationException();
+        public UsageStatistics getStatistics(Long userId) {
+            lastStatisticsUserId = userId;
+            return statistics;
         }
 
         @Override

@@ -7,3 +7,6 @@ logging:
         name: ai-platform
         version: ${APP_VERSION:dev}
         environment: ${APP_ENV:prod}
+
+auth:
+  registration-enabled: ${AUTH_REGISTRATION_ENABLED:false}

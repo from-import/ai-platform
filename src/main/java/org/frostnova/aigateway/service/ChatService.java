@@ -7,6 +7,7 @@ import org.frostnova.aigateway.config.AiGatewayProperties;
 import org.frostnova.aigateway.domain.model.AppChatRequest;
 import org.frostnova.aigateway.domain.model.LlmRequest;
 import org.frostnova.aigateway.domain.model.LlmResponse;
+import org.frostnova.aigateway.provider.LlmProvider;
 import org.frostnova.aigateway.provider.LlmProviderEnum;
 import org.frostnova.aigateway.provider.ProviderRegistry;
 import org.frostnova.aigateway.usage.service.LlmRequestRecordService;
@@ -35,21 +36,23 @@ public class ChatService {
         this.requestRecordService = requestRecordService;
     }
 
-    public LlmResponse executeChat(String requestId, AppChatRequest request) {
-        LlmProviderEnum provider = LlmProviderEnum.requireByCode(request.getProvider());
-        String model = properties.requireSupportedModel(provider, request.getModel());
+    public LlmResponse executeChat(String requestId, Long userId, AppChatRequest request) {
+        LlmProviderEnum providerEnum = LlmProviderEnum.requireByCode(request.getProvider());
+        String model = properties.requireSupportedModel(providerEnum, request.getModel());
         LlmRequest llmRequest = toLlmRequest(request, model);
 
         LocalDateTime requestedAt = LocalDateTime.now(ZoneOffset.UTC);
         long startNanos = System.nanoTime();
 
         try {
-            LlmResponse response = providerRegistry.getProvider(provider).chat(requestId, llmRequest);
+            LlmProvider provider = providerRegistry.getProvider(providerEnum);
+            LlmResponse response = provider.chat(requestId, llmRequest);
             long durationNanos = elapsedNanos(startNanos);
             long latencyMs = TimeUnit.NANOSECONDS.toMillis(durationNanos);
             requestRecordService.recordSuccess(
+                    userId,
                     requestId,
-                    provider.getCode(),
+                    providerEnum.getCode(),
                     model,
                     response,
                     latencyMs,
@@ -59,7 +62,7 @@ public class ChatService {
                     .addKeyValue("event.action", "llm.chat")
                     .addKeyValue("event.outcome", "success")
                     .addKeyValue("event.duration", durationNanos)
-                    .addKeyValue("provider", provider.getCode())
+                    .addKeyValue("provider", providerEnum.getCode())
                     .addKeyValue("model", model)
                     .log("LLM request completed");
             return response;
@@ -67,8 +70,9 @@ public class ChatService {
             long durationNanos = elapsedNanos(startNanos);
             long latencyMs = TimeUnit.NANOSECONDS.toMillis(durationNanos);
             requestRecordService.recordFailure(
+                    userId,
                     requestId,
-                    provider.getCode(),
+                    providerEnum.getCode(),
                     model,
                     exception,
                     latencyMs,
@@ -79,7 +83,7 @@ public class ChatService {
                     .addKeyValue("event.outcome", "failure")
                     .addKeyValue("event.duration", durationNanos)
                     .addKeyValue("error.code", errorCode(exception))
-                    .addKeyValue("provider", provider.getCode())
+                    .addKeyValue("provider", providerEnum.getCode())
                     .addKeyValue("model", model)
                     .setCause(exception)
                     .log("LLM request failed");

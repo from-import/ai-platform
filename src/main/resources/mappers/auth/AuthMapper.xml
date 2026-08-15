@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.frostnova.aigateway.auth.mapper.AuthMapper">
+
+    <resultMap id="userAccountResultMap"
+               type="org.frostnova.aigateway.auth.model.UserAccount">
+        <id property="id" column="id"/>
+        <result property="username" column="username"/>
+        <result property="passwordHash" column="password_hash"/>
+        <result property="displayName" column="display_name"/>
+        <result property="status" column="status"/>
+        <result property="role" column="role"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <resultMap id="authPrincipalResultMap"
+               type="org.frostnova.aigateway.auth.model.AuthPrincipal">
+        <id property="sessionId" column="session_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="username" column="username"/>
+        <result property="displayName" column="display_name"/>
+        <result property="role" column="role"/>
+        <result property="expiresAt" column="expires_at"/>
+    </resultMap>
+
+    <select id="findUserByUsername" resultMap="userAccountResultMap">
+        SELECT id,
+               username,
+               password_hash,
+               display_name,
+               status,
+               role,
+               created_at,
+               updated_at
+        FROM app_user
+        WHERE username = #{username}
+    </select>
+
+    <insert id="insertUser"
+            parameterType="org.frostnova.aigateway.auth.model.UserAccount"
+            useGeneratedKeys="true"
+            keyProperty="id">
+        INSERT INTO app_user (
+            username,
+            password_hash,
+            display_name,
+            status,
+            role
+        ) VALUES (
+            #{username},
+            #{passwordHash},
+            #{displayName},
+            #{status},
+            #{role}
+        )
+    </insert>
+
+    <insert id="insertSession"
+            parameterType="org.frostnova.aigateway.auth.model.AuthSession"
+            useGeneratedKeys="true"
+            keyProperty="id">
+        INSERT INTO auth_session (
+            user_id,
+            token_hash,
+            expires_at,
+            created_at,
+            last_used_at,
+            revoked_at
+        ) VALUES (
+            #{userId},
+            #{tokenHash},
+            #{expiresAt},
+            #{createdAt},
+            #{lastUsedAt},
+            #{revokedAt}
+        )
+    </insert>
+
+    <select id="findActivePrincipal" resultMap="authPrincipalResultMap">
+        SELECT auth_session.id AS session_id,
+               app_user.id AS user_id,
+               app_user.username,
+               app_user.display_name,
+               app_user.role,
+               auth_session.expires_at
+        FROM auth_session
+        INNER JOIN app_user ON app_user.id = auth_session.user_id
+        WHERE auth_session.token_hash = #{tokenHash}
+          AND auth_session.revoked_at IS NULL
+          AND auth_session.expires_at &gt; #{now}
+          AND app_user.status = 'ACTIVE'
+    </select>
+
+    <update id="touchSession">
+        UPDATE auth_session
+        SET last_used_at = #{lastUsedAt}
+        WHERE id = #{sessionId}
+          AND revoked_at IS NULL
+    </update>
+
+    <update id="revokeSession">
+        UPDATE auth_session
+        SET revoked_at = #{revokedAt}
+        WHERE token_hash = #{tokenHash}
+          AND revoked_at IS NULL
+    </update>
+
+</mapper>

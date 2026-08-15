@@ -31,6 +31,7 @@ export type RequestStatus = "SUCCESS" | "FAILED";
 
 export interface RequestRecord {
   id: number;
+  userId: number | null;
   requestId: string;
   provider: string;
   model: string;
@@ -67,4 +68,29 @@ export interface RequestRecordQuery {
 export interface ApiErrorPayload {
   code: string;
   message: string;
+}
+
+export type UserRole = "USER" | "ADMIN";
+
+export interface UserInfo {
+  id: number;
+  username: string;
+  displayName: string;
+  role: UserRole;
+}
+
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface RegisterRequest extends LoginRequest {
+  displayName: string;
+}
+
+export interface LoginResponse {
+  token: string;
+  tokenType: "Bearer";
+  expiresAt: string;
+  user: UserInfo;
 }

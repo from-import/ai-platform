@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
 public class LlmRequestRecord {
 
     private Long id;
+    private Long userId;
     private String requestId;
     private String provider;
     private String model;

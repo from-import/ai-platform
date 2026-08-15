@@ -1,5 +1,8 @@
 package org.frostnova.aigateway.usage.mapper;
 
+import org.frostnova.aigateway.auth.api.RegisterRequest;
+import org.frostnova.aigateway.auth.api.UserView;
+import org.frostnova.aigateway.auth.service.AuthService;
 import org.frostnova.aigateway.usage.model.LlmRequestRecord;
 import org.frostnova.aigateway.usage.model.LlmRequestRecordQuery;
 import org.frostnova.aigateway.usage.model.LlmRequestStatus;
@@ -22,6 +25,9 @@ class LlmRequestRecordMapperTests {
 
     @Autowired
     private LlmRequestRecordMapper mapper;
+
+    @Autowired
+    private AuthService authService;
 
     @Test
     void createsReadsUpdatesAndDeletesRequestRecord() {
@@ -92,7 +98,7 @@ class LlmRequestRecordMapperTests {
                 .requestedAt(requestedAt.plusSeconds(1))
                 .build());
 
-        UsageStatistics statistics = mapper.getStatistics();
+        UsageStatistics statistics = mapper.getStatistics(null);
 
         assertThat(statistics.getTotalRequests()).isEqualTo(2);
         assertThat(statistics.getSuccessfulRequests()).isEqualTo(1);
@@ -133,6 +139,7 @@ class LlmRequestRecordMapperTests {
 
         LlmRequestRecordQuery query = new LlmRequestRecordQuery(
                 null,
+                null,
                 "gemini",
                 "gemini-3.6-flash",
                 LlmRequestStatus.SUCCESS,
@@ -146,5 +153,60 @@ class LlmRequestRecordMapperTests {
         assertThat(mapper.count(query)).isEqualTo(1);
         assertThat(records).extracting(LlmRequestRecord::getRequestId)
                 .containsExactly("page-gemini-success");
+    }
+
+    @Test
+    void isolatesRecordsAndStatisticsByUser() {
+        UserView firstUser = authService.register(new RegisterRequest(
+                "usage-user-one",
+                "correct-password",
+                "Usage User One"
+        ));
+        UserView secondUser = authService.register(new RegisterRequest(
+                "usage-user-two",
+                "correct-password",
+                "Usage User Two"
+        ));
+        LocalDateTime requestedAt = LocalDateTime.of(2026, 8, 2, 10, 30);
+
+        mapper.insert(LlmRequestRecord.builder()
+                .userId(firstUser.id())
+                .requestId("user-one-request")
+                .provider("gemini")
+                .model("gemini-flash-latest")
+                .resultStatus(LlmRequestStatus.SUCCESS)
+                .totalTokens(10)
+                .latencyMs(100L)
+                .requestedAt(requestedAt)
+                .build());
+        mapper.insert(LlmRequestRecord.builder()
+                .userId(secondUser.id())
+                .requestId("user-two-request")
+                .provider("groq")
+                .model("llama-3.3-70b-versatile")
+                .resultStatus(LlmRequestStatus.SUCCESS)
+                .totalTokens(20)
+                .latencyMs(200L)
+                .requestedAt(requestedAt.plusSeconds(1))
+                .build());
+
+        LlmRequestRecordQuery firstUserQuery = new LlmRequestRecordQuery(
+                firstUser.id(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                0,
+                20
+        );
+
+        assertThat(mapper.findPage(firstUserQuery))
+                .extracting(LlmRequestRecord::getRequestId)
+                .containsExactly("user-one-request");
+        assertThat(mapper.getStatistics(firstUser.id()).getTotalRequests()).isEqualTo(1);
+        assertThat(mapper.getStatistics(firstUser.id()).getTotalTokens()).isEqualTo(10);
+        assertThat(mapper.getStatistics(null).getTotalRequests()).isEqualTo(2);
     }
 }

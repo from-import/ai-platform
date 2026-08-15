@@ -1,13 +1,14 @@
 package org.frostnova.aigateway.usage.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.frostnova.aigateway.auth.model.AuthPrincipal;
 import org.frostnova.aigateway.common.exception.BaseException;
 import org.frostnova.aigateway.common.exception.ErrorCodes;
 import org.frostnova.aigateway.domain.model.LlmResponse;
 import org.frostnova.aigateway.usage.mapper.LlmRequestRecordMapper;
+import org.frostnova.aigateway.usage.model.LlmRequestRecord;
 import org.frostnova.aigateway.usage.model.LlmRequestRecordPage;
 import org.frostnova.aigateway.usage.model.LlmRequestRecordQuery;
-import org.frostnova.aigateway.usage.model.LlmRequestRecord;
 import org.frostnova.aigateway.usage.model.LlmRequestStatus;
 import org.frostnova.aigateway.usage.model.UsageStatistics;
 import org.springframework.stereotype.Service;
@@ -15,6 +16,7 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.time.LocalDateTime;
+import java.util.Objects;
 
 @Slf4j
 @Service
@@ -28,11 +30,12 @@ public class LlmRequestRecordService {
         this.mapper = mapper;
     }
 
-    public UsageStatistics getStatistics() {
-        return mapper.getStatistics();
+    public UsageStatistics getStatistics(AuthPrincipal principal) {
+        return mapper.getStatistics(visibleUserId(principal));
     }
 
     public LlmRequestRecordPage getRequestRecords(
+            AuthPrincipal principal,
             String requestId,
             String provider,
             String model,
@@ -57,6 +60,7 @@ public class LlmRequestRecordService {
 
         long offset = (long) (page - 1) * pageSize;
         LlmRequestRecordQuery query = new LlmRequestRecordQuery(
+                visibleUserId(principal),
                 normalize(requestId),
                 normalize(provider),
                 normalize(model),
@@ -79,6 +83,7 @@ public class LlmRequestRecordService {
     }
 
     public void recordSuccess(
+            Long userId,
             String requestId,
             String provider,
             String model,
@@ -87,6 +92,7 @@ public class LlmRequestRecordService {
             LocalDateTime requestedAt
     ) {
         LlmRequestRecord record = baseRecord(
+                userId,
                 requestId,
                 provider,
                 model,
@@ -101,6 +107,7 @@ public class LlmRequestRecordService {
     }
 
     public void recordFailure(
+            Long userId,
             String requestId,
             String provider,
             String model,
@@ -109,6 +116,7 @@ public class LlmRequestRecordService {
             LocalDateTime requestedAt
     ) {
         LlmRequestRecord record = baseRecord(
+                userId,
                 requestId,
                 provider,
                 model,
@@ -123,6 +131,7 @@ public class LlmRequestRecordService {
     }
 
     private LlmRequestRecord baseRecord(
+            Long userId,
             String requestId,
             String provider,
             String model,
@@ -131,6 +140,7 @@ public class LlmRequestRecordService {
             LocalDateTime requestedAt
     ) {
         return LlmRequestRecord.builder()
+                .userId(Objects.requireNonNull(userId, "userId must not be null"))
                 .requestId(requestId)
                 .provider(provider)
                 .model(model)
@@ -138,6 +148,13 @@ public class LlmRequestRecordService {
                 .latencyMs(latencyMs)
                 .requestedAt(requestedAt)
                 .build();
+    }
+
+    private Long visibleUserId(AuthPrincipal principal) {
+        if (principal.getRole().canViewAllUsage()) {
+            return null;
+        }
+        return principal.getUserId();
     }
 
     private Integer upstreamStatusCode(RuntimeException exception) {

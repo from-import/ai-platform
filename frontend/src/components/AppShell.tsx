@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 import type { ApiErrorNotice } from "../api/client";
+import type { UserInfo } from "../api/types";
 
 interface AppShellProps {
   children: ReactNode;
@@ -8,6 +9,8 @@ interface AppShellProps {
   statusState?: "busy" | "error";
   apiError: ApiErrorNotice | null;
   onDismissApiError: () => void;
+  currentUser: UserInfo;
+  onLogout: () => void;
 }
 
 function PlaygroundIcon() {
@@ -42,9 +45,13 @@ export function AppShell({
   statusState,
   apiError,
   onDismissApiError,
+  currentUser,
+  onLogout,
 }: AppShellProps) {
   const navClassName = ({ isActive }: { isActive: boolean }) =>
     `nav-link${isActive ? " active" : ""}`;
+  const isAdministrator = currentUser.role === "ADMIN";
+  const roleLabel = isAdministrator ? "Administrator" : "Standard user";
 
   return (
     <div className="app-shell">
@@ -69,7 +76,34 @@ export function AppShell({
           </NavLink>
         </nav>
 
-        <div className={`status${statusState ? ` ${statusState}` : ""}`}>{status}</div>
+        <div className="sidebar-footer">
+          <div className="account-panel">
+            <span
+              className={`account-avatar${isAdministrator ? " administrator" : ""}`}
+              title={`${currentUser.displayName || currentUser.username} · ${roleLabel}`}
+            >
+              {(currentUser.displayName || currentUser.username).slice(0, 1).toUpperCase()}
+            </span>
+            <span className="account-copy">
+              <strong>{currentUser.displayName || currentUser.username}</strong>
+              <small>
+                @{currentUser.username}
+                <span className={`account-role${isAdministrator ? " administrator" : ""}`}>
+                  {roleLabel}
+                </span>
+              </small>
+            </span>
+            <span
+              className={`account-role account-role-compact${isAdministrator ? " administrator" : ""}`}
+            >
+              {isAdministrator ? "Admin" : "User"}
+            </span>
+            <button className="logout-button" type="button" onClick={onLogout}>
+              Log out
+            </button>
+          </div>
+          <div className={`status${statusState ? ` ${statusState}` : ""}`}>{status}</div>
+        </div>
       </aside>
 
       <main className="app-main">
