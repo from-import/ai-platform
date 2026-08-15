@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 import type { ApiErrorNotice } from "../api/client";
 import type { UserInfo } from "../api/types";
+import { ConversationHistory } from "./ConversationHistory";
 
 interface AppShellProps {
   children: ReactNode;
@@ -11,6 +12,7 @@ interface AppShellProps {
   onDismissApiError: () => void;
   currentUser: UserInfo;
   onLogout: () => void;
+  conversationRevision: number;
 }
 
 function PlaygroundIcon() {
@@ -47,6 +49,7 @@ export function AppShell({
   onDismissApiError,
   currentUser,
   onLogout,
+  conversationRevision,
 }: AppShellProps) {
   const navClassName = ({ isActive }: { isActive: boolean }) =>
     `nav-link${isActive ? " active" : ""}`;
@@ -75,6 +78,8 @@ export function AppShell({
             <span>Request Logs</span>
           </NavLink>
         </nav>
+
+        <ConversationHistory revision={conversationRevision} />
 
         <div className="sidebar-footer">
           <div className="account-panel">

@@ -7,6 +7,7 @@ import org.frostnova.aigateway.common.exception.ErrorCodes;
 import org.frostnova.aigateway.domain.model.LlmResponse;
 import org.frostnova.aigateway.usage.mapper.LlmRequestRecordMapper;
 import org.frostnova.aigateway.usage.model.LlmRequestRecord;
+import org.frostnova.aigateway.usage.model.LlmRequestRecordContext;
 import org.frostnova.aigateway.usage.model.LlmRequestRecordPage;
 import org.frostnova.aigateway.usage.model.LlmRequestRecordQuery;
 import org.frostnova.aigateway.usage.model.LlmRequestStatus;
@@ -83,23 +84,10 @@ public class LlmRequestRecordService {
     }
 
     public void recordSuccess(
-            Long userId,
-            String requestId,
-            String provider,
-            String model,
-            LlmResponse response,
-            long latencyMs,
-            LocalDateTime requestedAt
+            LlmRequestRecordContext context,
+            LlmResponse response
     ) {
-        LlmRequestRecord record = baseRecord(
-                userId,
-                requestId,
-                provider,
-                model,
-                LlmRequestStatus.SUCCESS,
-                latencyMs,
-                requestedAt
-        );
+        LlmRequestRecord record = baseRecord(context, LlmRequestStatus.SUCCESS);
         record.setPromptTokens(response.getPromptTokens());
         record.setCompletionTokens(response.getCompletionTokens());
         record.setTotalTokens(response.getTotalTokens());
@@ -107,23 +95,10 @@ public class LlmRequestRecordService {
     }
 
     public void recordFailure(
-            Long userId,
-            String requestId,
-            String provider,
-            String model,
-            RuntimeException exception,
-            long latencyMs,
-            LocalDateTime requestedAt
+            LlmRequestRecordContext context,
+            RuntimeException exception
     ) {
-        LlmRequestRecord record = baseRecord(
-                userId,
-                requestId,
-                provider,
-                model,
-                LlmRequestStatus.FAILED,
-                latencyMs,
-                requestedAt
-        );
+        LlmRequestRecord record = baseRecord(context, LlmRequestStatus.FAILED);
         record.setUpstreamStatusCode(upstreamStatusCode(exception));
         record.setErrorCode(errorCode(exception));
         record.setErrorMessage(truncate(exception.getMessage()));
@@ -131,22 +106,17 @@ public class LlmRequestRecordService {
     }
 
     private LlmRequestRecord baseRecord(
-            Long userId,
-            String requestId,
-            String provider,
-            String model,
-            LlmRequestStatus status,
-            long latencyMs,
-            LocalDateTime requestedAt
+            LlmRequestRecordContext context,
+            LlmRequestStatus status
     ) {
         return LlmRequestRecord.builder()
-                .userId(Objects.requireNonNull(userId, "userId must not be null"))
-                .requestId(requestId)
-                .provider(provider)
-                .model(model)
+                .userId(Objects.requireNonNull(context.getUserId(), "userId must not be null"))
+                .requestId(context.getRequestId())
+                .provider(context.getProvider())
+                .model(context.getModel())
                 .resultStatus(status)
-                .latencyMs(latencyMs)
-                .requestedAt(requestedAt)
+                .latencyMs(context.latencyMs())
+                .requestedAt(context.getRequestedAt())
                 .build();
     }
 

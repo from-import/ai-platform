@@ -1,11 +1,17 @@
 package org.frostnova.aigateway.service;
 
+import org.frostnova.aigateway.chat.ChatService;
+import org.frostnova.aigateway.chat.command.ChatCommand;
 import org.frostnova.aigateway.common.exception.BaseException;
 import org.frostnova.aigateway.common.exception.ErrorCodes;
 import org.frostnova.aigateway.config.AiGatewayProperties;
+import org.frostnova.aigateway.conversation.manager.ConversationManager;
+import org.frostnova.aigateway.conversation.model.ChatConversation;
+import org.frostnova.aigateway.conversation.model.ConversationRole;
 import org.frostnova.aigateway.domain.model.AppChatRequest;
 import org.frostnova.aigateway.domain.model.LlmRequest;
 import org.frostnova.aigateway.domain.model.LlmResponse;
+import org.frostnova.aigateway.domain.model.Message;
 import org.frostnova.aigateway.provider.LlmProvider;
 import org.frostnova.aigateway.provider.LlmProviderEnum;
 import org.frostnova.aigateway.provider.ProviderRegistry;
@@ -35,6 +41,8 @@ class ChatServiceTests {
     private AiGatewayProperties properties;
     private CapturingProvider geminiProvider;
     private CapturingRequestRecordMapper requestRecordMapper;
+    private CapturingConversationManager conversationManager;
+    private ChatConversation conversation;
     private ChatService chatService;
 
     @BeforeEach
@@ -47,10 +55,17 @@ class ChatServiceTests {
 
         geminiProvider = new CapturingProvider(LlmProviderEnum.GEMINI);
         requestRecordMapper = new CapturingRequestRecordMapper();
+        conversation = ChatConversation.builder()
+                .id("conversation-test")
+                .userId(USER_ID)
+                .title("hello")
+                .build();
+        conversationManager = new CapturingConversationManager(conversation);
         chatService = new ChatService(
                 new ProviderRegistry(List.of(geminiProvider)),
                 properties,
-                new LlmRequestRecordService(requestRecordMapper)
+                new LlmRequestRecordService(requestRecordMapper),
+                conversationManager
         );
     }
 
@@ -61,9 +76,10 @@ class ChatServiceTests {
         request.setModel("test-model");
         request.setUserMessage("hello");
 
-        LlmResponse response = chatService.executeChat(REQUEST_ID, USER_ID, request);
+        LlmResponse response = chatService.executeChat(command(request));
 
         assertThat(response.getContent()).isEqualTo("ok");
+        assertThat(response.getConversationId()).isEqualTo(conversation.getId());
         assertThat(geminiProvider.lastRequestId).isEqualTo(REQUEST_ID);
         assertThat(geminiProvider.lastRequest.getModel()).isEqualTo("test-model");
         assertThat(geminiProvider.lastRequest.getMessages())
@@ -81,7 +97,31 @@ class ChatServiceTests {
                     assertThat(record.getModel()).isEqualTo("test-model");
                     assertThat(record.getResultStatus()).isEqualTo(LlmRequestStatus.SUCCESS);
                     assertThat(record.getRequestedAt()).isNotNull();
+                    assertThat(record.getLatencyMs()).isBetween(0L, 60_000L);
                 });
+        assertThat(conversationManager.appendedRoles)
+                .containsExactly(ConversationRole.USER, ConversationRole.ASSISTANT);
+        assertThat(conversationManager.appendedContents).containsExactly("hello", "ok");
+    }
+
+    @Test
+    void sendsPersistedConversationHistoryToProvider() {
+        conversationManager.history.add(new Message("user", "first question"));
+        conversationManager.history.add(new Message("assistant", "first answer"));
+        AppChatRequest request = new AppChatRequest();
+        request.setConversationId(conversation.getId());
+        request.setProvider("gemini");
+        request.setModel("test-model");
+        request.setUserMessage("follow-up question");
+
+        chatService.executeChat(command(request));
+
+        assertThat(geminiProvider.lastRequest.getMessages())
+                .containsExactly(
+                        new Message("user", "first question"),
+                        new Message("assistant", "first answer"),
+                        new Message("user", "follow-up question")
+                );
     }
 
     @Test
@@ -89,6 +129,7 @@ class ChatServiceTests {
         AppChatRequest request = new AppChatRequest();
         request.setProvider("gemini");
         request.setModel("test-model");
+        request.setUserMessage("hello");
         RuntimeException failure = new BaseException(
                 ErrorCodes.LLM_PROVIDER_ERROR,
                 "Provider unavailable",
@@ -96,7 +137,7 @@ class ChatServiceTests {
         );
         geminiProvider.failure = failure;
 
-        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, USER_ID, request))
+        assertThatThrownBy(() -> chatService.executeChat(command(request)))
                 .isSameAs(failure);
 
         assertThat(requestRecordMapper.records)
@@ -106,6 +147,22 @@ class ChatServiceTests {
                     assertThat(record.getErrorCode()).isEqualTo(ErrorCodes.LLM_PROVIDER_ERROR);
                     assertThat(record.getErrorMessage()).isEqualTo("Provider unavailable");
                 });
+        assertThat(conversationManager.appendedRoles).containsExactly(ConversationRole.USER);
+        assertThat(conversationManager.appendedContents).containsExactly("hello");
+    }
+
+    @Test
+    void rejectsBlankUserMessageBeforeCreatingConversation() {
+        AppChatRequest request = new AppChatRequest();
+        request.setProvider("gemini");
+        request.setModel("test-model");
+        request.setUserMessage(" ");
+
+        assertThatThrownBy(() -> chatService.executeChat(command(request)))
+                .isInstanceOf(BaseException.class)
+                .hasMessage("User message must not be blank");
+
+        assertThat(conversationManager.resolveCalls).isZero();
     }
 
     @Test
@@ -114,7 +171,7 @@ class ChatServiceTests {
         request.setProvider("gemini");
         request.setModel("unknown-model");
 
-        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, USER_ID, request))
+        assertThatThrownBy(() -> chatService.executeChat(command(request)))
                 .isInstanceOfSatisfying(BaseException.class, exception -> {
                     assertThat(exception.getCode()).isEqualTo(ErrorCodes.UNSUPPORTED_MODEL);
                     assertThat(exception.getMessage())
@@ -129,7 +186,7 @@ class ChatServiceTests {
         request.setProvider("gemini");
         request.setModel(" ");
 
-        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, USER_ID, request))
+        assertThatThrownBy(() -> chatService.executeChat(command(request)))
                 .isInstanceOf(BaseException.class)
                 .hasMessage("Model must not be blank");
     }
@@ -140,7 +197,7 @@ class ChatServiceTests {
         request.setProvider("unknown");
         request.setModel("test-model");
 
-        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, USER_ID, request))
+        assertThatThrownBy(() -> chatService.executeChat(command(request)))
                 .isInstanceOf(BaseException.class)
                 .hasMessage("Unsupported provider: unknown");
     }
@@ -150,7 +207,7 @@ class ChatServiceTests {
         AppChatRequest request = new AppChatRequest();
         request.setModel("test-model");
 
-        assertThatThrownBy(() -> chatService.executeChat(REQUEST_ID, USER_ID, request))
+        assertThatThrownBy(() -> chatService.executeChat(command(request)))
                 .isInstanceOf(BaseException.class)
                 .hasMessage("Provider must not be blank");
     }
@@ -162,6 +219,10 @@ class ChatServiceTests {
         assertThatThrownBy(() -> new ProviderRegistry(List.of(geminiProvider, duplicate)))
                 .isInstanceOf(BaseException.class)
                 .hasMessage("Duplicate provider registered: gemini");
+    }
+
+    private ChatCommand command(AppChatRequest request) {
+        return new ChatCommand(REQUEST_ID, USER_ID, request);
     }
 
     private static final class CapturingProvider implements LlmProvider {
@@ -191,6 +252,42 @@ class ChatServiceTests {
             response.setContent("ok");
             response.setProviderName(providerCode.getCode());
             return response;
+        }
+    }
+
+    private static final class CapturingConversationManager extends ConversationManager {
+
+        private final ChatConversation conversation;
+        private final List<ConversationRole> appendedRoles = new ArrayList<>();
+        private final List<String> appendedContents = new ArrayList<>();
+        private final List<Message> history = new ArrayList<>();
+        private int resolveCalls;
+
+        private CapturingConversationManager(ChatConversation conversation) {
+            super(null, null, null, null);
+            this.conversation = conversation;
+        }
+
+        @Override
+        public ChatConversation resolveConversation(Long userId, AppChatRequest request) {
+            resolveCalls++;
+            return conversation;
+        }
+
+        @Override
+        public void appendMessage(
+                ChatConversation conversation,
+                ConversationRole role,
+                String content
+        ) {
+            appendedRoles.add(role);
+            appendedContents.add(content);
+            history.add(new Message(role.name().toLowerCase(), content));
+        }
+
+        @Override
+        public List<Message> loadMessageHistory(ChatConversation conversation) {
+            return List.copyOf(history);
         }
     }
 

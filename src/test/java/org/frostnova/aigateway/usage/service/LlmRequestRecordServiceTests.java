@@ -5,6 +5,7 @@ import org.frostnova.aigateway.auth.model.UserRole;
 import org.frostnova.aigateway.domain.model.LlmResponse;
 import org.frostnova.aigateway.usage.mapper.LlmRequestRecordMapper;
 import org.frostnova.aigateway.usage.model.LlmRequestRecord;
+import org.frostnova.aigateway.usage.model.LlmRequestRecordContext;
 import org.frostnova.aigateway.usage.model.LlmRequestRecordPage;
 import org.frostnova.aigateway.usage.model.LlmRequestRecordQuery;
 import org.frostnova.aigateway.usage.model.LlmRequestStatus;
@@ -19,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -45,13 +47,15 @@ class LlmRequestRecordServiceTests {
         LocalDateTime requestedAt = LocalDateTime.of(2026, 8, 2, 12, 0);
 
         service.recordSuccess(
-                USER_ID,
-                "request-success",
-                "gemini",
-                "gemini-flash-latest",
-                response,
-                350,
-                requestedAt
+                LlmRequestRecordContext.builder()
+                        .userId(USER_ID)
+                        .requestId("request-success")
+                        .provider("gemini")
+                        .model("gemini-flash-latest")
+                        .durationNanos(TimeUnit.MILLISECONDS.toNanos(350))
+                        .requestedAt(requestedAt)
+                        .build(),
+                response
         );
 
         LlmRequestRecord record = capturedRecord();
@@ -76,13 +80,15 @@ class LlmRequestRecordServiceTests {
         );
 
         service.recordFailure(
-                USER_ID,
-                "request-failed",
-                "groq",
-                "llama-3.3-70b-versatile",
-                exception,
-                125,
-                LocalDateTime.of(2026, 8, 2, 12, 0)
+                LlmRequestRecordContext.builder()
+                        .userId(USER_ID)
+                        .requestId("request-failed")
+                        .provider("groq")
+                        .model("llama-3.3-70b-versatile")
+                        .durationNanos(TimeUnit.MILLISECONDS.toNanos(125))
+                        .requestedAt(LocalDateTime.of(2026, 8, 2, 12, 0))
+                        .build(),
+                exception
         );
 
         LlmRequestRecord record = capturedRecord();
@@ -98,13 +104,15 @@ class LlmRequestRecordServiceTests {
         mapper.failOnInsert = true;
 
         assertThatCode(() -> service.recordSuccess(
-                USER_ID,
-                "request-success",
-                "gemini",
-                "gemini-flash-latest",
-                new LlmResponse(),
-                50,
-                LocalDateTime.of(2026, 8, 2, 12, 0)
+                LlmRequestRecordContext.builder()
+                        .userId(USER_ID)
+                        .requestId("request-success")
+                        .provider("gemini")
+                        .model("gemini-flash-latest")
+                        .durationNanos(TimeUnit.MILLISECONDS.toNanos(50))
+                        .requestedAt(LocalDateTime.of(2026, 8, 2, 12, 0))
+                        .build(),
+                new LlmResponse()
         )).doesNotThrowAnyException();
     }
 

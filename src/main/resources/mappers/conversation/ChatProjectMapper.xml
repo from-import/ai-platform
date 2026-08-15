@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.frostnova.aigateway.conversation.mapper.ChatProjectMapper">
+
+    <resultMap id="chatProjectResultMap"
+               type="org.frostnova.aigateway.conversation.model.ChatProject">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="name" column="name"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="projectColumns">
+        id,
+        user_id,
+        name,
+        created_at,
+        updated_at
+    </sql>
+
+    <insert id="insert"
+            parameterType="org.frostnova.aigateway.conversation.model.ChatProject">
+        INSERT INTO chat_project (
+            id,
+            user_id,
+            name
+        ) VALUES (
+            #{id},
+            #{userId},
+            #{name}
+        )
+    </insert>
+
+    <select id="findByIdAndUserId" resultMap="chatProjectResultMap">
+        SELECT
+        <include refid="projectColumns"/>
+        FROM chat_project
+        WHERE id = #{id}
+          AND user_id = #{userId}
+    </select>
+
+    <select id="findAllByUserId" resultMap="chatProjectResultMap">
+        SELECT
+        <include refid="projectColumns"/>
+        FROM chat_project
+        WHERE user_id = #{userId}
+        ORDER BY updated_at DESC, id DESC
+    </select>
+
+    <update id="updateName">
+        UPDATE chat_project
+        SET name = #{name}
+        WHERE id = #{id}
+          AND user_id = #{userId}
+    </update>
+
+    <delete id="deleteByIdAndUserId">
+        DELETE FROM chat_project
+        WHERE id = #{id}
+          AND user_id = #{userId}
+    </delete>
+
+</mapper>

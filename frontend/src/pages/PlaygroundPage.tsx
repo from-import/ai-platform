@@ -1,25 +1,65 @@
-import { useEffect, useState, type KeyboardEvent } from "react";
-import { createChatCompletion } from "../api/client";
-import type { ModelInfo } from "../api/types";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { createChatCompletion, getConversation } from "../api/client";
+import type { ConversationItem, ModelInfo } from "../api/types";
 import { ModelPicker } from "../components/ModelPicker";
 import { PageHeader } from "../components/PageHeader";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import { isAbortError } from "../utils/format";
 
 interface PlaygroundPageProps {
   models: ModelInfo[];
   modelsLoading: boolean;
   modelsError: string | null;
+  onConversationUpdated: () => void;
 }
 
-export function PlaygroundPage({ models, modelsLoading, modelsError }: PlaygroundPageProps) {
-  useDocumentTitle("Playground");
+interface DisplayMessage {
+  key: string;
+  role: "USER" | "ASSISTANT";
+  content: string;
+  state?: "waiting" | "error";
+}
+
+function textFromItem(item: ConversationItem): string {
+  return (item.payload.content || [])
+    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text || "")
+    .join("\n");
+}
+
+function displayMessages(items: ConversationItem[]): DisplayMessage[] {
+  return items
+    .filter(
+      (item) => item.itemType === "MESSAGE"
+        && (item.role === "USER" || item.role === "ASSISTANT"),
+    )
+    .map((item) => ({
+      key: String(item.id),
+      role: item.role as "USER" | "ASSISTANT",
+      content: textFromItem(item),
+    }));
+}
+
+export function PlaygroundPage({
+  models,
+  modelsLoading,
+  modelsError,
+  onConversationUpdated,
+}: PlaygroundPageProps) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { conversationId } = useParams<{ conversationId: string }>();
   const [prompt, setPrompt] = useState("");
   const [selectedModel, setSelectedModel] = useState<ModelInfo | null>(null);
-  const [submittedPrompt, setSubmittedPrompt] = useState<string | null>(null);
-  const [answer, setAnswer] = useState("");
-  const [answerState, setAnswerState] = useState<"idle" | "waiting" | "answer" | "error">("idle");
+  const [conversationTitle, setConversationTitle] = useState<string | null>(null);
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [conversationLoading, setConversationLoading] = useState(false);
   const [requestStatus, setRequestStatus] = useState("");
   const [sending, setSending] = useState(false);
+  const conversationEndRef = useRef<HTMLDivElement | null>(null);
+
+  useDocumentTitle(conversationTitle || "Playground");
 
   useEffect(() => {
     if (models.length === 0) {
@@ -37,14 +77,43 @@ export function PlaygroundPage({ models, modelsLoading, modelsError }: Playgroun
   }, [models, selectedModel]);
 
   useEffect(() => {
-    if (modelsLoading) {
-      setRequestStatus("Loading models...");
-    } else if (modelsError) {
-      setRequestStatus(modelsError);
-    } else {
+    const controller = new AbortController();
+    setPrompt("");
+    if (!conversationId) {
+      setConversationTitle(null);
+      setMessages([]);
+      setConversationLoading(false);
       setRequestStatus("");
+      return () => controller.abort();
     }
-  }, [modelsError, modelsLoading]);
+
+    setConversationLoading(true);
+    setRequestStatus("Loading conversation...");
+    void getConversation(conversationId, controller.signal)
+      .then((detail) => {
+        setConversationTitle(detail.conversation.title);
+        setMessages(displayMessages(detail.items));
+        setRequestStatus("");
+      })
+      .catch((error: unknown) => {
+        if (!isAbortError(error)) {
+          setConversationTitle(null);
+          setMessages([]);
+          setRequestStatus("Conversation could not be loaded");
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setConversationLoading(false);
+      });
+    return () => controller.abort();
+  }, [conversationId, location.search]);
+
+  useEffect(() => {
+    conversationEndRef.current?.scrollIntoView({
+      behavior: conversationLoading ? "auto" : "smooth",
+      block: "end",
+    });
+  }, [conversationLoading, messages]);
 
   async function sendRequest(): Promise<void> {
     const userMessage = prompt.trim();
@@ -57,26 +126,42 @@ export function PlaygroundPage({ models, modelsLoading, modelsError }: Playgroun
       return;
     }
 
+    const turnId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const pendingKey = `assistant-${turnId}`;
     setSending(true);
-    setSubmittedPrompt(userMessage);
     setPrompt("");
-    setAnswer("Thinking...");
-    setAnswerState("waiting");
+    setMessages((current) => [
+      ...current,
+      { key: `user-${turnId}`, role: "USER", content: userMessage },
+      { key: pendingKey, role: "ASSISTANT", content: "Thinking…", state: "waiting" },
+    ]);
     setRequestStatus("Generating response...");
 
     try {
       const result = await createChatCompletion({
+        conversationId,
         provider: selectedModel.provider,
         model: selectedModel.model,
         userMessage,
       });
-      setAnswer(result.content || "(empty response)");
-      setAnswerState("answer");
+      setMessages((current) => current.map((message) => (
+        message.key === pendingKey
+          ? { ...message, content: result.content || "(empty response)", state: undefined }
+          : message
+      )));
       setRequestStatus("");
+      onConversationUpdated();
+      if (!conversationId) {
+        navigate(`/playground/${result.conversationId}`, { replace: true });
+      }
     } catch {
-      setAnswer("The request could not be completed.");
-      setAnswerState("error");
+      setMessages((current) => current.map((message) => (
+        message.key === pendingKey
+          ? { ...message, content: "The request could not be completed.", state: "error" }
+          : message
+      )));
       setRequestStatus("Error");
+      onConversationUpdated();
     } finally {
       setSending(false);
     }
@@ -89,37 +174,50 @@ export function PlaygroundPage({ models, modelsLoading, modelsError }: Playgroun
     }
   }
 
+  const isEmpty = !conversationLoading && messages.length === 0;
+  const composerStatus = modelsLoading
+    ? "Loading models..."
+    : modelsError || requestStatus;
+
   return (
     <section className="view">
       <PageHeader
-        title="Playground"
-        description="Test requests across configured providers and models."
+        title={conversationTitle || "Playground"}
+        description={conversationId ? "Conversation history" : "Start a new conversation."}
       />
 
       <div className="playground-body">
-        <section className={`conversation${submittedPrompt ? "" : " empty"}`} aria-live="polite">
-          {submittedPrompt ? (
-            <>
-              <article className="message user-message">
-                <span className="message-role">You</span>
-                <div>{submittedPrompt}</div>
-              </article>
-              <article className="message assistant-message">
-                <span className="assistant-mark">AI</span>
-                <div>
-                  <span className="message-role">AI Platform</span>
-                  <div className={`answer${answerState === "error" ? " error-text" : ""}`}>
-                    {answer}
-                  </div>
-                </div>
-              </article>
-            </>
-          ) : (
+        <section className={`conversation${isEmpty ? " empty" : ""}`} aria-live="polite">
+          {conversationLoading ? (
+            <div className="conversation-empty-state">
+              <h2>Loading conversation…</h2>
+            </div>
+          ) : null}
+          {isEmpty ? (
             <div className="conversation-empty-state">
               <h2>How can I help?</h2>
               <p>Choose a model and send a message to the gateway.</p>
             </div>
-          )}
+          ) : null}
+          {!conversationLoading ? messages.map((message) => (
+            message.role === "USER" ? (
+              <article key={message.key} className="message user-message">
+                <span className="message-role">You</span>
+                <div>{message.content}</div>
+              </article>
+            ) : (
+              <article key={message.key} className="message assistant-message">
+                <span className="assistant-mark">AI</span>
+                <div>
+                  <span className="message-role">AI Platform</span>
+                  <div className={`answer${message.state === "error" ? " error-text" : ""}`}>
+                    {message.content}
+                  </div>
+                </div>
+              </article>
+            )
+          )) : null}
+          <div ref={conversationEndRef} />
         </section>
 
         <div className="composer-wrap">
@@ -131,12 +229,13 @@ export function PlaygroundPage({ models, modelsLoading, modelsError }: Playgroun
               id="prompt"
               value={prompt}
               placeholder="Message the gateway"
+              disabled={conversationLoading}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={handlePromptKeyDown}
             />
             <div className="composer-footer">
-              <span className={`composer-hint${answerState === "error" ? " error-text" : ""}`}>
-                {requestStatus || "Use Ctrl/⌘ + Enter to send"}
+              <span className={`composer-hint${composerStatus === "Error" ? " error-text" : ""}`}>
+                {composerStatus || "Use Ctrl/⌘ + Enter to send"}
               </span>
               <div className="model-control">
                 <span className="sr-only">Model</span>
@@ -152,7 +251,7 @@ export function PlaygroundPage({ models, modelsLoading, modelsError }: Playgroun
                 type="button"
                 title="Send request"
                 aria-label="Send request"
-                disabled={sending || !selectedModel}
+                disabled={sending || conversationLoading || !selectedModel}
                 onClick={() => void sendRequest()}
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">

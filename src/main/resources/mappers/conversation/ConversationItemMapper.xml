@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.frostnova.aigateway.conversation.mapper.ConversationItemMapper">
+
+    <resultMap id="conversationItemResultMap"
+               type="org.frostnova.aigateway.conversation.model.ConversationItem">
+        <id property="id" column="id"/>
+        <result property="conversationId" column="conversation_id"/>
+        <result property="sequenceNo" column="sequence_no"/>
+        <result property="itemType" column="item_type"/>
+        <result property="role" column="role"/>
+        <result property="payload" column="payload"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <sql id="itemColumns">
+        conversation_item.id,
+        conversation_item.conversation_id,
+        conversation_item.sequence_no,
+        conversation_item.item_type,
+        conversation_item.role,
+        conversation_item.payload,
+        conversation_item.created_at
+    </sql>
+
+    <insert id="insert"
+            parameterType="org.frostnova.aigateway.conversation.model.ConversationItem"
+            useGeneratedKeys="true"
+            keyProperty="id">
+        INSERT INTO conversation_item (
+            conversation_id,
+            sequence_no,
+            item_type,
+            role,
+            payload
+        ) VALUES (
+            #{conversationId},
+            #{sequenceNo},
+            #{itemType},
+            #{role},
+            #{payload}
+        )
+    </insert>
+
+    <select id="findByIdAndUserId" resultMap="conversationItemResultMap">
+        SELECT
+        <include refid="itemColumns"/>
+        FROM conversation_item
+        INNER JOIN chat_conversation
+                ON chat_conversation.id = conversation_item.conversation_id
+        WHERE conversation_item.id = #{id}
+          AND chat_conversation.user_id = #{userId}
+    </select>
+
+    <select id="findByConversationIdAndUserId" resultMap="conversationItemResultMap">
+        SELECT
+        <include refid="itemColumns"/>
+        FROM conversation_item
+        INNER JOIN chat_conversation
+                ON chat_conversation.id = conversation_item.conversation_id
+        WHERE conversation_item.conversation_id = #{conversationId}
+          AND chat_conversation.user_id = #{userId}
+        ORDER BY conversation_item.sequence_no ASC
+    </select>
+
+    <select id="findLastSequenceNo" resultType="int">
+        SELECT COALESCE(MAX(conversation_item.sequence_no), 0)
+        FROM conversation_item
+        INNER JOIN chat_conversation
+                ON chat_conversation.id = conversation_item.conversation_id
+        WHERE conversation_item.conversation_id = #{conversationId}
+          AND chat_conversation.user_id = #{userId}
+    </select>
+
+</mapper>

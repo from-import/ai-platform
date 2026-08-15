@@ -8,6 +8,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 @Slf4j
 @MapperScan({
         "org.frostnova.aigateway.auth.mapper",
+        "org.frostnova.aigateway.conversation.mapper",
         "org.frostnova.aigateway.usage.mapper"
 })
 @SpringBootApplication

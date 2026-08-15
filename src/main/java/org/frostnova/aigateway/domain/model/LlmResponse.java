@@ -8,6 +8,11 @@ import lombok.Data;
 @Data
 public class LlmResponse {
     /**
+     * 当前回答所属的对话 ID，下一轮请求应原样传回。
+     */
+    private String conversationId;
+
+    /**
      * 返回文本
      */
     private String content;

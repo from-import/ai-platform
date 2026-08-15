@@ -2,6 +2,8 @@ import type {
   ApiErrorPayload,
   ChatRequest,
   ChatResponse,
+  ConversationDetail,
+  ConversationPage,
   LoginRequest,
   LoginResponse,
   ModelInfo,
@@ -150,6 +152,28 @@ export function createChatCompletion(
     body: JSON.stringify(chatRequest),
     signal,
   });
+}
+
+export function getConversations(
+  cursor?: string,
+  limit = 20,
+  signal?: AbortSignal,
+): Promise<ConversationPage> {
+  const parameters = new URLSearchParams({ limit: String(limit) });
+  if (cursor) {
+    parameters.set("cursor", cursor);
+  }
+  return request<ConversationPage>(`/api/v1/conversations?${parameters}`, { signal });
+}
+
+export function getConversation(
+  conversationId: string,
+  signal?: AbortSignal,
+): Promise<ConversationDetail> {
+  return request<ConversationDetail>(
+    `/api/v1/conversations/${encodeURIComponent(conversationId)}`,
+    { signal },
+  );
 }
 
 export function getUsageStatistics(signal?: AbortSignal): Promise<UsageStatistics> {

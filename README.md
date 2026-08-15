@@ -61,14 +61,19 @@ Content-Type: application/json
 
 ```json
 {
+  "conversationId": "7f87c29f-d51b-4ed4-a0a2-d9e2cc1a75dd",
   "content": "Data + Algorithms = Insights",
   "promptTokens": 0,
   "completionTokens": 0,
+  "totalTokens": 0,
   "providerName": "gemini"
 }
 ```
 
-Token values depend on whether the selected provider returns usage metadata.
+Omit `conversationId` to create a conversation. Send the returned ID with the next request to
+append the new user and assistant messages to the same conversation and include its history in
+the model request. `projectId` is optional when creating a conversation. Token values depend on
+whether the selected provider returns usage metadata.
 
 ### Model Discovery
 

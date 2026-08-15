@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import {
   clearLatestApiError,
@@ -47,6 +47,7 @@ function AuthenticatedApp() {
   const navigate = useNavigate();
   const session = getAuthSession()!;
   const { models, loading, error } = useModels();
+  const [conversationRevision, setConversationRevision] = useState(0);
   const apiError = useSyncExternalStore(
     subscribeToApiErrors,
     getLatestApiError,
@@ -81,12 +82,31 @@ function AuthenticatedApp() {
       onDismissApiError={clearLatestApiError}
       currentUser={session.user}
       onLogout={() => void handleLogout()}
+      conversationRevision={conversationRevision}
     >
       <Routes>
         <Route path="/" element={<Navigate to="/playground" replace />} />
         <Route
           path="/playground"
-          element={<PlaygroundPage models={models} modelsLoading={loading} modelsError={error} />}
+          element={(
+            <PlaygroundPage
+              models={models}
+              modelsLoading={loading}
+              modelsError={error}
+              onConversationUpdated={() => setConversationRevision((value) => value + 1)}
+            />
+          )}
+        />
+        <Route
+          path="/playground/:conversationId"
+          element={(
+            <PlaygroundPage
+              models={models}
+              modelsLoading={loading}
+              modelsError={error}
+              onConversationUpdated={() => setConversationRevision((value) => value + 1)}
+            />
+          )}
         />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/requests" element={<RequestLogsPage models={models} />} />
