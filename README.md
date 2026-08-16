@@ -1,8 +1,12 @@
 # AI Platform
 
-A Spring Boot backend that exposes one chat API and routes requests to different LLM providers through a normalized request/response model.
+A full-stack AI chat gateway with a Spring Boot backend and React frontend. It routes normalized
+chat requests to multiple LLM providers while keeping credentials, authentication, conversation
+history, and usage records on the server.
 
-The current milestone is a small, explicit **LLM gateway**. Clients provide a provider and one of its concrete models, while the gateway normalizes provider protocols and keeps upstream credentials on the server.
+The current milestone is an account-scoped conversational product built on an explicit
+**LLM gateway**. Clients select a provider and concrete model; the gateway adapts provider
+protocols and exposes both regular JSON and streaming SSE responses.
 
 ## What Works Today
 
@@ -25,6 +29,7 @@ The current milestone is a small, explicit **LLM gateway**. Clients provide a pr
 - Authentication protection for all gateway and usage APIs
 - Persistent user/assistant conversation history with cursor pagination
 - SSE chat streaming with incremental Markdown rendering in the web UI
+- Provider-native conversation history (`messages[]` for Groq and `contents[]` for Gemini)
 - User-owned projects that group related conversations
 - ChatGPT-style sidebar navigation with project creation and conversation moves
 
@@ -32,41 +37,54 @@ The current milestone is a small, explicit **LLM gateway**. Clients provide a pr
 
 ```mermaid
 flowchart LR
-    Client["Web UI / API Client"] --> API["POST /api/v1/chat/completions"]
-    API --> Service["ChatService"]
-    Service --> Model["Validate provider and model"]
-    Model --> Registry["ProviderRegistry"]
+    Client["React UI / API Client"] --> API["JSON or SSE Chat API"]
+    API --> Auth["Bearer authentication"]
+    Auth --> Service["ChatService"]
+    Service <--> History["ConversationManager"]
+    History <--> MySQL["MySQL"]
+    Service --> Registry["ProviderRegistry"]
     Registry --> Gemini["Gemini Provider"]
     Registry --> Groq["Groq Provider"]
-    Gemini --> Response["Normalized LlmResponse"]
-    Groq --> Response
+    Gemini --> Chunks["Normalized LlmResponse chunks"]
+    Groq --> Chunks
+    Chunks --> SSE["SSE incremental response"]
+    Chunks --> Assembly["Assemble final assistant message"]
+    Assembly --> History
+    SSE --> Client
 ```
 
-`ChatService` validates the requested provider and checks the model against that provider's allowlist. It then builds a provider-neutral `LlmRequest` and delegates it to the registered provider implementation. Provider-specific payloads and response parsing stay inside each adapter.
+`ChatService` validates the provider/model pair, resolves the user's conversation, appends the new
+user message, and loads the ordered history. Provider-specific payloads stay inside each adapter:
+Groq receives OpenAI-compatible `messages[]`, while Gemini receives one `contents[]` entry per
+message and maps the internal `assistant` role to Gemini's `model` role. During streaming, chunks
+are forwarded immediately and assembled in memory; only one complete assistant message is written
+to MySQL when the stream finishes successfully.
 
 ## API
 
-### Request
+### Chat Completions
+
+All chat endpoints require a Bearer session token and use the same JSON request body.
+
+#### Regular response
 
 ```http
 POST /api/v1/chat/completions
 Content-Type: application/json
+Authorization: Bearer <session-token>
 ```
-
-Use the same request body with `POST /api/v1/chat/completions/stream` to receive
-`text/event-stream`. Every `message` event contains a normalized `LlmResponse` chunk. The first
-event supplies the `conversationId`, content chunks follow as the provider emits them, and token
-usage is included when the provider reports it. Only the assembled assistant response is persisted.
 
 ```json
 {
+  "conversationId": null,
+  "projectId": null,
   "provider": "gemini",
   "model": "gemini-flash-latest",
   "userMessage": "Explain how AI works in a few words"
 }
 ```
 
-### Response
+The regular endpoint returns one normalized response:
 
 ```json
 {
@@ -79,10 +97,39 @@ usage is included when the provider reports it. Only the assembled assistant res
 }
 ```
 
+#### Streaming response
+
+```http
+POST /api/v1/chat/completions/stream
+Content-Type: application/json
+Accept: text/event-stream
+Authorization: Bearer <session-token>
+```
+
+The stream emits named SSE events. The first `message` event establishes the new
+`conversationId`; later events contain provider text deltas and, when available, token usage.
+The following stream is abbreviated and omits nullable token fields:
+
+```text
+event:message
+data:{"conversationId":"7f87c29f-d51b-4ed4-a0a2-d9e2cc1a75dd","content":"","providerName":"gemini"}
+
+event:message
+data:{"conversationId":"7f87c29f-d51b-4ed4-a0a2-d9e2cc1a75dd","content":"Data + ","providerName":"gemini"}
+
+event:message
+data:{"conversationId":"7f87c29f-d51b-4ed4-a0a2-d9e2cc1a75dd","content":"Algorithms = Insights","providerName":"gemini"}
+```
+
+If the provider fails after streaming has started, the endpoint emits an `error` event. The web UI
+consumes the response with `fetch` and a `ReadableStream`, appending each delta to the current
+assistant message and re-rendering its Markdown as data arrives.
+
 Omit `conversationId` to create a conversation. Send the returned ID with the next request to
 append the new user and assistant messages to the same conversation and include its history in
-the model request. `projectId` is optional when creating a conversation. Token values depend on
-whether the selected provider returns usage metadata.
+the next provider request. `projectId` is optional when creating a conversation; it does not move
+an existing conversation. Token values depend on whether the selected provider returns usage
+metadata.
 
 ### Conversations and Projects
 
@@ -101,6 +148,31 @@ Conversation lists use an opaque cursor returned as `nextCursor`. Sending `proje
 first message creates a conversation directly in that project. The move endpoint accepts a
 project ID or `null` to return the conversation to the unassigned Chats list. Every project and
 conversation lookup is scoped to the authenticated user.
+
+Create a project with:
+
+```json
+{
+  "name": "Agent Runtime"
+}
+```
+
+Move a conversation by sending this body to the `PATCH` endpoint:
+
+```json
+{
+  "projectId": "15bbfa3e-06cd-4ad2-a222-788dc29f34db"
+}
+```
+
+Use `{"projectId": null}` to move it back to the unassigned Chats list.
+
+### Web UI Behavior
+
+- Conversation lists load progressively with cursor pagination and an intersection observer.
+- A new conversation can be created inside a project or moved between a project and Chats.
+- Assistant text is rendered with `react-markdown` and GitHub Flavored Markdown support.
+- Streaming deltas update the active Markdown message without persisting each individual chunk.
 
 ### Model Discovery
 
@@ -228,6 +300,9 @@ export AUTH_SESSION_TTL="12h"
 export CHAT_STREAM_TIMEOUT="5m"
 ```
 
+`CHAT_STREAM_TIMEOUT` controls the Spring MVC async-request timeout for long generations and
+defaults to five minutes.
+
 Install the frontend dependencies once:
 
 ```bash
@@ -260,11 +335,12 @@ Open the bundled UI:
 http://localhost:8080/
 ```
 
-Or call the API directly:
+Or call the streaming API directly. `--no-buffer` lets curl print each SSE event as it arrives:
 
 ```bash
-curl --request POST "http://localhost:8080/api/v1/chat/completions" \
+curl --no-buffer --request POST "http://localhost:8080/api/v1/chat/completions/stream" \
   --header "Content-Type: application/json" \
+  --header "Accept: text/event-stream" \
   --header "Authorization: Bearer ${AI_PLATFORM_TOKEN}" \
   --data '{
     "provider": "gemini",
@@ -306,13 +382,17 @@ Frontend source lives in `frontend/`. The `src/main/resources/static/` directory
 
 ## Roadmap
 
-1. **Gateway resilience**
+1. **Conversation lifecycle**
+   Add rename, delete, search, archive, edit, regenerate, and context-window summarization.
+2. **Streaming controls**
+   Add stop generation, cancellation accounting, reconnect handling, and partial-response policy.
+3. **Gateway resilience**
    Add runtime failover, bounded retries, timeouts, rate limiting, and circuit breaking.
-2. **Observability**
+4. **Observability**
    Add latency metrics, provider-level success rates, and distributed tracing.
-3. **Agent runtime**
+5. **Agent runtime**
    Implement function calling, a tool registry, bounded ReAct loops, step persistence, cancellation, and execution limits.
-4. **Controlled code tools**
+6. **Controlled code tools**
    Add workspace allowlists, path validation, file-size limits, timeouts, and explicit tool permissions before enabling code or file access.
 
 ## Status
