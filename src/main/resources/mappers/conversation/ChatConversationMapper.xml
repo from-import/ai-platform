@@ -73,6 +73,12 @@
         <include refid="conversationColumns"/>
         FROM chat_conversation
         WHERE user_id = #{userId}
+        <if test="projectId != null">
+          AND project_id = #{projectId, jdbcType=CHAR}
+        </if>
+        <if test="unassignedOnly">
+          AND project_id IS NULL
+        </if>
         <if test="cursorLastMessageAt != null">
           AND (
               last_message_at &lt; #{cursorLastMessageAt, jdbcType=TIMESTAMP}

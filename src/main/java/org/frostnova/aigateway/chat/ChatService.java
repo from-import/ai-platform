@@ -19,6 +19,8 @@ import org.frostnova.aigateway.usage.model.LlmRequestRecordContext;
 import org.frostnova.aigateway.usage.service.LlmRequestRecordService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 
 import java.util.List;
 
@@ -84,11 +86,127 @@ public class ChatService {
         return response;
     }
 
+    public Flux<LlmResponse> executeChatStream(ChatCommand chatCommand) {
+        String requestId = chatCommand.getRequestId();
+        AppChatRequest request = chatCommand.getRequest();
+        LlmProviderEnum providerEnum = chatCommand.getProviderEnum();
+        String model = properties.requireSupportedModel(providerEnum, request.getModel());
+        String userMessage = requireUserMessage(request);
+
+        ChatConversation conversation = conversationManager.resolveConversation(
+                chatCommand.getUserId(),
+                request
+        );
+        conversationManager.appendMessage(conversation, ConversationRole.USER, userMessage);
+        List<Message> history = conversationManager.loadMessageHistory(conversation);
+        LlmRequest llmRequest = toLlmRequest(history, model);
+        LlmRequestRecordContext recordContext = chatCommand.generateRecordContext(model);
+
+        ChatStreamLifecycle lifecycle = new ChatStreamLifecycle(
+                conversation,
+                recordContext,
+                providerEnum
+        );
+        Flux<LlmResponse> providerStream = Flux.defer(() ->
+                providerRegistry.getProvider(providerEnum)
+                        .streamChat(requestId, llmRequest)
+        );
+
+        return Flux.concat(Flux.just(lifecycle.startedResponse()), providerStream)
+                // MyBatis writes are blocking, so downstream side effects run off the WebClient thread.
+                .publishOn(Schedulers.boundedElastic())
+                .doOnNext(lifecycle::accept)
+                .doOnComplete(lifecycle::complete)
+                .onErrorMap(lifecycle::fail);
+    }
+
+    private void mergeResponseMetadata(LlmResponse target, LlmResponse source) {
+        if (source.getProviderName() != null) {
+            target.setProviderName(source.getProviderName());
+        }
+        if (source.getPromptTokens() != null) {
+            target.setPromptTokens(source.getPromptTokens());
+        }
+        if (source.getCompletionTokens() != null) {
+            target.setCompletionTokens(source.getCompletionTokens());
+        }
+        if (source.getTotalTokens() != null) {
+            target.setTotalTokens(source.getTotalTokens());
+        }
+    }
+
+    private final class ChatStreamLifecycle {
+
+        private final ChatConversation conversation;
+        private final LlmRequestRecordContext recordContext;
+        private final String providerName;
+        private final StringBuilder contentBuffer = new StringBuilder();
+        private final LlmResponse finalResponse = new LlmResponse();
+
+        private ChatStreamLifecycle(
+                ChatConversation conversation,
+                LlmRequestRecordContext recordContext,
+                LlmProviderEnum provider
+        ) {
+            this.conversation = conversation;
+            this.recordContext = recordContext;
+            this.providerName = provider.getCode();
+            this.finalResponse.setConversationId(conversation.getId());
+            this.finalResponse.setProviderName(providerName);
+        }
+
+        private LlmResponse startedResponse() {
+            LlmResponse response = new LlmResponse();
+            response.setConversationId(conversation.getId());
+            response.setProviderName(providerName);
+            response.setContent("");
+            return response;
+        }
+
+        private void accept(LlmResponse response) {
+            response.setConversationId(conversation.getId());
+            if (response.getContent() != null) {
+                contentBuffer.append(response.getContent());
+            }
+            mergeResponseMetadata(finalResponse, response);
+        }
+
+        private void complete() {
+            finalResponse.setContent(contentBuffer.toString());
+            conversationManager.appendMessage(
+                    conversation,
+                    ConversationRole.ASSISTANT,
+                    finalResponse.getContent()
+            );
+            recordContext.recordEndTime();
+            requestRecordService.recordSuccess(recordContext, finalResponse);
+            logSuccess(recordContext);
+        }
+
+        private RuntimeException fail(Throwable exception) {
+            RuntimeException runtimeException = exception instanceof RuntimeException value
+                    ? value
+                    : new RuntimeException(exception);
+            return recordFailure(recordContext, runtimeException);
+        }
+    }
+
+    private RuntimeException recordFailure(
+            LlmRequestRecordContext context,
+            RuntimeException exception
+    ) {
+        context.recordEndTime();
+        requestRecordService.recordFailure(context, exception);
+        logFailure(context, exception);
+        return toChatException(exception);
+    }
+
     private void logSuccess(LlmRequestRecordContext context) {
         log.atInfo()
                 .addKeyValue("event.action", "llm.chat")
                 .addKeyValue("event.outcome", "success")
                 .addKeyValue("event.duration", context.getDurationNanos())
+                .addKeyValue("request.id", context.getRequestId())
                 .addKeyValue("provider", context.getProvider())
                 .addKeyValue("model", context.getModel())
                 .log("LLM request completed");
@@ -102,6 +220,7 @@ public class ChatService {
                 .addKeyValue("event.action", "llm.chat")
                 .addKeyValue("event.outcome", "failure")
                 .addKeyValue("event.duration", context.getDurationNanos())
+                .addKeyValue("request.id", context.getRequestId())
                 .addKeyValue("error.code", errorCode(exception))
                 .addKeyValue("provider", context.getProvider())
                 .addKeyValue("model", context.getModel())

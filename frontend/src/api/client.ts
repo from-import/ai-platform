@@ -2,11 +2,14 @@ import type {
   ApiErrorPayload,
   ChatRequest,
   ChatResponse,
+  CreateProjectRequest,
   ConversationDetail,
   ConversationPage,
+  ConversationSummary,
   LoginRequest,
   LoginResponse,
   ModelInfo,
+  ProjectView,
   RegisterRequest,
   RequestRecordPage,
   RequestRecordQuery,
@@ -154,16 +157,170 @@ export function createChatCompletion(
   });
 }
 
-export function getConversations(
-  cursor?: string,
-  limit = 20,
+export async function createChatCompletionStream(
+  chatRequest: ChatRequest,
+  onChunk: (response: ChatResponse) => void,
   signal?: AbortSignal,
-): Promise<ConversationPage> {
-  const parameters = new URLSearchParams({ limit: String(limit) });
-  if (cursor) {
-    parameters.set("cursor", cursor);
+): Promise<ChatResponse> {
+  const headers = new Headers({
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+  });
+  const token = getAuthToken();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
   }
-  return request<ConversationPage>(`/api/v1/conversations?${parameters}`, { signal });
+
+  let response: Response;
+  try {
+    response = await fetch("/api/v1/chat/completions/stream", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(chatRequest),
+      signal,
+    });
+  } catch (error) {
+    throw toNetworkError(error);
+  }
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({})) as Partial<ApiErrorPayload>;
+    const apiError = new ApiError(response.status, {
+      code: payload.code || "REQUEST_FAILED",
+      message: payload.message || `Request failed with HTTP ${response.status}`,
+    });
+    if (response.status === 401) {
+      clearAuthSession();
+    }
+    publishApiError(apiError);
+    throw apiError;
+  }
+
+  if (!response.body) {
+    const apiError = new ApiError(0, {
+      code: "STREAM_UNAVAILABLE",
+      message: "The chat response stream is unavailable",
+    });
+    publishApiError(apiError);
+    throw apiError;
+  }
+
+  const result: ChatResponse = {
+    conversationId: "",
+    content: "",
+    promptTokens: null,
+    completionTokens: null,
+    totalTokens: null,
+    providerName: null,
+  };
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      buffer = consumeSseEvents(buffer, (eventName, chunk) => {
+        if (eventName === "error") {
+          throw new ApiError(response.status, {
+            code: "LLM_PROVIDER_ERROR",
+            message: chunk.content || "The model response failed",
+          });
+        }
+        mergeChatChunk(result, chunk);
+        onChunk({ ...result });
+      });
+      if (done) {
+        break;
+      }
+    }
+  } catch (error) {
+    if (error instanceof ApiError) {
+      publishApiError(error);
+      throw error;
+    }
+    throw toNetworkError(error);
+  } finally {
+    reader.releaseLock();
+  }
+
+  return result;
+}
+
+function consumeSseEvents(
+  input: string,
+  consume: (eventName: string, chunk: ChatResponse) => void,
+): string {
+  let buffer = input;
+  let boundary = buffer.match(/\r?\n\r?\n/);
+  while (boundary?.index !== undefined) {
+    const block = buffer.slice(0, boundary.index);
+    buffer = buffer.slice(boundary.index + boundary[0].length);
+    const lines = block.split(/\r?\n/);
+    let eventName = "message";
+    const dataLines: string[] = [];
+    for (const line of lines) {
+      if (line.startsWith("event:")) {
+        eventName = line.slice("event:".length).trim();
+      } else if (line.startsWith("data:")) {
+        dataLines.push(line.slice("data:".length).trimStart());
+      }
+    }
+    if (dataLines.length > 0) {
+      consume(eventName, JSON.parse(dataLines.join("\n")) as ChatResponse);
+    }
+    boundary = buffer.match(/\r?\n\r?\n/);
+  }
+  return buffer;
+}
+
+function mergeChatChunk(target: ChatResponse, chunk: ChatResponse): void {
+  if (chunk.conversationId) target.conversationId = chunk.conversationId;
+  if (chunk.content) target.content = `${target.content || ""}${chunk.content}`;
+  if (chunk.promptTokens != null) target.promptTokens = chunk.promptTokens;
+  if (chunk.completionTokens != null) target.completionTokens = chunk.completionTokens;
+  if (chunk.totalTokens != null) target.totalTokens = chunk.totalTokens;
+  if (chunk.providerName) target.providerName = chunk.providerName;
+}
+
+function toNetworkError(error: unknown): Error {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return error;
+  }
+  if (error instanceof ApiError) {
+    return error;
+  }
+  const apiError = new ApiError(0, {
+    code: "NETWORK_ERROR",
+    message: "Unable to reach the AI Platform service",
+  });
+  publishApiError(apiError);
+  return apiError;
+}
+
+export interface ConversationQuery {
+  cursor?: string;
+  limit?: number;
+  projectId?: string;
+  unassignedOnly?: boolean;
+  signal?: AbortSignal;
+}
+
+export function getConversations(query: ConversationQuery = {}): Promise<ConversationPage> {
+  const parameters = new URLSearchParams({ limit: String(query.limit ?? 20) });
+  if (query.cursor) {
+    parameters.set("cursor", query.cursor);
+  }
+  if (query.projectId) {
+    parameters.set("projectId", query.projectId);
+  }
+  if (query.unassignedOnly) {
+    parameters.set("unassignedOnly", "true");
+  }
+  return request<ConversationPage>(`/api/v1/conversations?${parameters}`, {
+    signal: query.signal,
+  });
 }
 
 export function getConversation(
@@ -173,6 +330,36 @@ export function getConversation(
   return request<ConversationDetail>(
     `/api/v1/conversations/${encodeURIComponent(conversationId)}`,
     { signal },
+  );
+}
+
+export function getProjects(signal?: AbortSignal): Promise<ProjectView[]> {
+  return request<ProjectView[]>("/api/v1/projects", { signal });
+}
+
+export function getProject(projectId: string, signal?: AbortSignal): Promise<ProjectView> {
+  return request<ProjectView>(`/api/v1/projects/${encodeURIComponent(projectId)}`, { signal });
+}
+
+export function createProject(project: CreateProjectRequest): Promise<ProjectView> {
+  return request<ProjectView>("/api/v1/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(project),
+  });
+}
+
+export function moveConversation(
+  conversationId: string,
+  projectId: string | null,
+): Promise<ConversationSummary> {
+  return request<ConversationSummary>(
+    `/api/v1/conversations/${encodeURIComponent(conversationId)}/project`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId }),
+    },
   );
 }
 

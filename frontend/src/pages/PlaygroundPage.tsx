@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { createChatCompletion, getConversation } from "../api/client";
+import { createChatCompletionStream, getConversation, getProject } from "../api/client";
 import type { ConversationItem, ModelInfo } from "../api/types";
+import { MarkdownMessage } from "../components/MarkdownMessage";
 import { ModelPicker } from "../components/ModelPicker";
 import { PageHeader } from "../components/PageHeader";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
@@ -49,17 +50,22 @@ export function PlaygroundPage({
 }: PlaygroundPageProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { conversationId } = useParams<{ conversationId: string }>();
+  const { conversationId, projectId } = useParams<{
+    conversationId?: string;
+    projectId?: string;
+  }>();
   const [prompt, setPrompt] = useState("");
   const [selectedModel, setSelectedModel] = useState<ModelInfo | null>(null);
   const [conversationTitle, setConversationTitle] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState<string | null>(null);
+  const [projectLoading, setProjectLoading] = useState(false);
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [conversationLoading, setConversationLoading] = useState(false);
   const [requestStatus, setRequestStatus] = useState("");
   const [sending, setSending] = useState(false);
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
 
-  useDocumentTitle(conversationTitle || "Playground");
+  useDocumentTitle(conversationTitle || projectName || "Playground");
 
   useEffect(() => {
     if (models.length === 0) {
@@ -75,6 +81,26 @@ export function PlaygroundPage({
       setSelectedModel(models[0]);
     }
   }, [models, selectedModel]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    if (!projectId) {
+      setProjectName(null);
+      setProjectLoading(false);
+      return () => controller.abort();
+    }
+
+    setProjectLoading(true);
+    void getProject(projectId, controller.signal)
+      .then((project) => setProjectName(project.name))
+      .catch((error: unknown) => {
+        if (!isAbortError(error)) setProjectName(null);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setProjectLoading(false);
+      });
+    return () => controller.abort();
+  }, [projectId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -138,12 +164,23 @@ export function PlaygroundPage({
     setRequestStatus("Generating response...");
 
     try {
-      const result = await createChatCompletion({
-        conversationId,
-        provider: selectedModel.provider,
-        model: selectedModel.model,
-        userMessage,
-      });
+      const result = await createChatCompletionStream(
+        {
+          conversationId,
+          projectId,
+          provider: selectedModel.provider,
+          model: selectedModel.model,
+          userMessage,
+        },
+        (streamedResponse) => {
+          if (!streamedResponse.content) return;
+          setMessages((current) => current.map((message) => (
+            message.key === pendingKey
+              ? { ...message, content: streamedResponse.content || "", state: undefined }
+              : message
+          )));
+        },
+      );
       setMessages((current) => current.map((message) => (
         message.key === pendingKey
           ? { ...message, content: result.content || "(empty response)", state: undefined }
@@ -152,7 +189,12 @@ export function PlaygroundPage({
       setRequestStatus("");
       onConversationUpdated();
       if (!conversationId) {
-        navigate(`/playground/${result.conversationId}`, { replace: true });
+        navigate(
+          projectId
+            ? `/projects/${projectId}/conversations/${result.conversationId}`
+            : `/playground/${result.conversationId}`,
+          { replace: true },
+        );
       }
     } catch {
       setMessages((current) => current.map((message) => (
@@ -175,15 +217,19 @@ export function PlaygroundPage({
   }
 
   const isEmpty = !conversationLoading && messages.length === 0;
-  const composerStatus = modelsLoading
-    ? "Loading models..."
-    : modelsError || requestStatus;
+  const composerStatus = projectLoading
+    ? "Loading project..."
+    : modelsLoading
+      ? "Loading models..."
+      : modelsError || requestStatus;
 
   return (
     <section className="view">
       <PageHeader
-        title={conversationTitle || "Playground"}
-        description={conversationId ? "Conversation history" : "Start a new conversation."}
+        title={conversationTitle || projectName || "Playground"}
+        description={conversationId
+          ? projectName ? `Conversation in ${projectName}` : "Conversation history"
+          : projectName ? `Start a new conversation in ${projectName}.` : "Start a new conversation."}
       />
 
       <div className="playground-body">
@@ -195,8 +241,12 @@ export function PlaygroundPage({
           ) : null}
           {isEmpty ? (
             <div className="conversation-empty-state">
-              <h2>How can I help?</h2>
-              <p>Choose a model and send a message to the gateway.</p>
+              <h2>{projectName ? `What are we working on in ${projectName}?` : "How can I help?"}</h2>
+              <p>
+                {projectName
+                  ? "This conversation will be organized under the current project."
+                  : "Choose a model and send a message to the gateway."}
+              </p>
             </div>
           ) : null}
           {!conversationLoading ? messages.map((message) => (
@@ -211,7 +261,7 @@ export function PlaygroundPage({
                 <div>
                   <span className="message-role">AI Platform</span>
                   <div className={`answer${message.state === "error" ? " error-text" : ""}`}>
-                    {message.content}
+                    <MarkdownMessage content={message.content} />
                   </div>
                 </div>
               </article>
@@ -229,7 +279,7 @@ export function PlaygroundPage({
               id="prompt"
               value={prompt}
               placeholder="Message the gateway"
-              disabled={conversationLoading}
+              disabled={conversationLoading || projectLoading}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={handlePromptKeyDown}
             />
@@ -251,7 +301,7 @@ export function PlaygroundPage({
                 type="button"
                 title="Send request"
                 aria-label="Send request"
-                disabled={sending || conversationLoading || !selectedModel}
+                disabled={sending || conversationLoading || projectLoading || !selectedModel}
                 onClick={() => void sendRequest()}
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">

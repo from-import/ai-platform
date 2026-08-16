@@ -193,6 +193,67 @@ class ConversationManagerTests {
                 );
     }
 
+    @Test
+    void createsProjectsFiltersChatsAndMovesConversationWithinUserBoundary() {
+        UserView owner = register("project-manager-owner");
+        UserView otherUser = register("project-manager-other");
+        var project = conversationManager.createProject(owner.id(), "  Agent runtime  ");
+        ChatConversation unassigned = conversationManager.resolveConversation(
+                owner.id(),
+                request(null, null, "Unassigned chat")
+        );
+        ChatConversation assigned = conversationManager.resolveConversation(
+                owner.id(),
+                request(null, project.id(), "Project chat")
+        );
+
+        assertThat(project.name()).isEqualTo("Agent runtime");
+        assertThat(conversationManager.listProjects(owner.id()))
+                .extracting(item -> item.id())
+                .containsExactly(project.id());
+        assertThat(conversationManager.getProject(owner.id(), project.id()).name())
+                .isEqualTo("Agent runtime");
+        assertThat(conversationManager.listConversations(
+                owner.id(), null, 20, null, true
+        ).items())
+                .extracting(item -> item.id())
+                .containsExactly(unassigned.getId());
+        assertThat(conversationManager.listConversations(
+                owner.id(), null, 20, project.id(), false
+        ).items())
+                .extracting(item -> item.id())
+                .containsExactly(assigned.getId());
+
+        var moved = conversationManager.moveConversation(
+                owner.id(),
+                unassigned.getId(),
+                project.id()
+        );
+
+        assertThat(moved.projectId()).isEqualTo(project.id());
+        assertThat(conversationManager.listConversations(
+                owner.id(), null, 20, project.id(), false
+        ).items())
+                .extracting(item -> item.id())
+                .containsExactlyInAnyOrder(assigned.getId(), unassigned.getId());
+        assertThat(conversationManager.listConversations(
+                owner.id(), null, 20, null, true
+        ).items()).isEmpty();
+
+        assertThatThrownBy(() -> conversationManager.getProject(otherUser.id(), project.id()))
+                .isInstanceOfSatisfying(BaseException.class, exception ->
+                        assertThat(exception.getCode()).isEqualTo(ErrorCodes.RESOURCE_NOT_FOUND)
+                );
+        assertThatThrownBy(() -> conversationManager.moveConversation(
+                otherUser.id(),
+                unassigned.getId(),
+                null
+        ))
+                .isInstanceOfSatisfying(BaseException.class, exception ->
+                        assertThat(exception.getCode()).isEqualTo(ErrorCodes.RESOURCE_NOT_FOUND)
+                );
+    }
+
     private AppChatRequest request(String conversationId, String projectId, String userMessage) {
         AppChatRequest request = new AppChatRequest();
         request.setConversationId(conversationId);

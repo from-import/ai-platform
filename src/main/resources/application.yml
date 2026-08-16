@@ -1,6 +1,9 @@
 spring:
   application:
     name: ai-platform
+  mvc:
+    async:
+      request-timeout: ${CHAT_STREAM_TIMEOUT:5m}
   datasource:
     url: ${AI_PLATFORM_DB_URL:jdbc:mysql://localhost:3306/ai_platform?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
     username: ${AI_PLATFORM_DB_USERNAME:ai_platform_app}

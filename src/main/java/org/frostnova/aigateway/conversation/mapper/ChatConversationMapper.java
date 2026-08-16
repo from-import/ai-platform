@@ -29,6 +29,8 @@ public interface ChatConversationMapper {
             @Param("userId") Long userId,
             @Param("cursorLastMessageAt") LocalDateTime cursorLastMessageAt,
             @Param("cursorId") String cursorId,
+            @Param("projectId") String projectId,
+            @Param("unassignedOnly") boolean unassignedOnly,
             @Param("limit") int limit
     );
 

@@ -24,6 +24,7 @@ import org.frostnova.aigateway.usage.service.LlmRequestRecordService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
+import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -122,6 +123,62 @@ class ChatServiceTests {
                         new Message("assistant", "first answer"),
                         new Message("user", "follow-up question")
                 );
+    }
+
+    @Test
+    void streamsChunksAndPersistsOneCompleteAssistantMessage() {
+        AppChatRequest request = new AppChatRequest();
+        request.setProvider("gemini");
+        request.setModel("test-model");
+        request.setUserMessage("hello");
+        geminiProvider.streamResponses = List.of(
+                streamResponse("hel", null, null, null),
+                streamResponse("lo", 3, 2, 5)
+        );
+
+        List<LlmResponse> responses = chatService.executeChatStream(command(request))
+                .collectList()
+                .block();
+
+        assertThat(responses).isNotNull();
+        assertThat(responses).extracting(LlmResponse::getContent)
+                .containsExactly("", "hel", "lo");
+        assertThat(responses).allSatisfy(response ->
+                assertThat(response.getConversationId()).isEqualTo(conversation.getId()));
+        assertThat(conversationManager.appendedRoles)
+                .containsExactly(ConversationRole.USER, ConversationRole.ASSISTANT);
+        assertThat(conversationManager.appendedContents).containsExactly("hello", "hello");
+        assertThat(requestRecordMapper.records)
+                .singleElement()
+                .satisfies(record -> {
+                    assertThat(record.getResultStatus()).isEqualTo(LlmRequestStatus.SUCCESS);
+                    assertThat(record.getPromptTokens()).isEqualTo(3);
+                    assertThat(record.getCompletionTokens()).isEqualTo(2);
+                    assertThat(record.getTotalTokens()).isEqualTo(5);
+                });
+    }
+
+    @Test
+    void recordsStreamingProviderFailureWithoutPersistingAssistantMessage() {
+        AppChatRequest request = new AppChatRequest();
+        request.setProvider("gemini");
+        request.setModel("test-model");
+        request.setUserMessage("hello");
+        geminiProvider.failure = new BaseException(
+                ErrorCodes.LLM_PROVIDER_ERROR,
+                "Provider unavailable",
+                HttpStatus.BAD_GATEWAY
+        );
+
+        assertThatThrownBy(() -> chatService.executeChatStream(command(request)).blockLast())
+                .isInstanceOf(BaseException.class)
+                .hasMessage("Provider unavailable");
+
+        assertThat(conversationManager.appendedRoles).containsExactly(ConversationRole.USER);
+        assertThat(requestRecordMapper.records)
+                .singleElement()
+                .satisfies(record ->
+                        assertThat(record.getResultStatus()).isEqualTo(LlmRequestStatus.FAILED));
     }
 
     @Test
@@ -225,12 +282,28 @@ class ChatServiceTests {
         return new ChatCommand(REQUEST_ID, USER_ID, request);
     }
 
+    private LlmResponse streamResponse(
+            String content,
+            Integer promptTokens,
+            Integer completionTokens,
+            Integer totalTokens
+    ) {
+        LlmResponse response = new LlmResponse();
+        response.setContent(content);
+        response.setProviderName(LlmProviderEnum.GEMINI.getCode());
+        response.setPromptTokens(promptTokens);
+        response.setCompletionTokens(completionTokens);
+        response.setTotalTokens(totalTokens);
+        return response;
+    }
+
     private static final class CapturingProvider implements LlmProvider {
 
         private final LlmProviderEnum providerCode;
         private String lastRequestId;
         private LlmRequest lastRequest;
         private RuntimeException failure;
+        private List<LlmResponse> streamResponses = List.of();
 
         private CapturingProvider(LlmProviderEnum providerCode) {
             this.providerCode = providerCode;
@@ -252,6 +325,16 @@ class ChatServiceTests {
             response.setContent("ok");
             response.setProviderName(providerCode.getCode());
             return response;
+        }
+
+        @Override
+        public Flux<LlmResponse> streamChat(String requestId, LlmRequest request) {
+            lastRequestId = requestId;
+            lastRequest = request;
+            if (failure != null) {
+                return Flux.error(failure);
+            }
+            return Flux.fromIterable(streamResponses);
         }
     }
 

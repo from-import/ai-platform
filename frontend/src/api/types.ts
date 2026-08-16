@@ -35,6 +35,17 @@ export interface ConversationPage {
   hasMore: boolean;
 }
 
+export interface ProjectView {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateProjectRequest {
+  name: string;
+}
+
 export type ConversationItemType = "MESSAGE" | "TOOL_CALL" | "TOOL_RESULT";
 export type ConversationRole = "USER" | "ASSISTANT" | "SYSTEM" | "TOOL";
 

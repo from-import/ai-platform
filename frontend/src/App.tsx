@@ -108,6 +108,28 @@ function AuthenticatedApp() {
             />
           )}
         />
+        <Route
+          path="/projects/:projectId"
+          element={(
+            <PlaygroundPage
+              models={models}
+              modelsLoading={loading}
+              modelsError={error}
+              onConversationUpdated={() => setConversationRevision((value) => value + 1)}
+            />
+          )}
+        />
+        <Route
+          path="/projects/:projectId/conversations/:conversationId"
+          element={(
+            <PlaygroundPage
+              models={models}
+              modelsLoading={loading}
+              modelsError={error}
+              onConversationUpdated={() => setConversationRevision((value) => value + 1)}
+            />
+          )}
+        />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/requests" element={<RequestLogsPage models={models} />} />
         <Route path="/login" element={<Navigate to="/playground" replace />} />

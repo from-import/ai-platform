@@ -6,10 +6,12 @@ import org.frostnova.aigateway.conversation.api.ConversationDetail;
 import org.frostnova.aigateway.conversation.api.ConversationItemView;
 import org.frostnova.aigateway.conversation.api.ConversationPage;
 import org.frostnova.aigateway.conversation.api.ConversationSummary;
+import org.frostnova.aigateway.conversation.api.ProjectView;
 import org.frostnova.aigateway.conversation.mapper.ChatConversationMapper;
 import org.frostnova.aigateway.conversation.mapper.ChatProjectMapper;
 import org.frostnova.aigateway.conversation.mapper.ConversationItemMapper;
 import org.frostnova.aigateway.conversation.model.ChatConversation;
+import org.frostnova.aigateway.conversation.model.ChatProject;
 import org.frostnova.aigateway.conversation.model.ConversationItem;
 import org.frostnova.aigateway.conversation.model.ConversationItemType;
 import org.frostnova.aigateway.conversation.model.ConversationRole;
@@ -61,6 +63,7 @@ public class ConversationManager {
     @Transactional
     public ChatConversation resolveConversation(Long userId, AppChatRequest request) {
         String conversationId = normalizeIdentifier(request.getConversationId());
+        String projectId = normalizeIdentifier(request.getProjectId());
         if (conversationId != null) {
             ChatConversation conversation = chatConversationMapper.findByIdAndUserId(
                     conversationId,
@@ -69,10 +72,12 @@ public class ConversationManager {
             if (conversation == null) {
                 throw resourceNotFound("Conversation not found");
             }
+            if (projectId != null && !projectId.equals(conversation.getProjectId())) {
+                throw resourceNotFound("Conversation not found in project");
+            }
             return conversation;
         }
 
-        String projectId = normalizeIdentifier(request.getProjectId());
         if (projectId != null && chatProjectMapper.findByIdAndUserId(projectId, userId) == null) {
             throw resourceNotFound("Project not found");
         }
@@ -89,6 +94,16 @@ public class ConversationManager {
     }
 
     public ConversationPage listConversations(Long userId, String encodedCursor, int pageSize) {
+        return listConversations(userId, encodedCursor, pageSize, null, false);
+    }
+
+    public ConversationPage listConversations(
+            Long userId,
+            String encodedCursor,
+            int pageSize,
+            String requestedProjectId,
+            boolean unassignedOnly
+    ) {
         if (pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
             throw new BaseException(
                     ErrorCodes.INVALID_REQUEST,
@@ -96,11 +111,24 @@ public class ConversationManager {
             );
         }
 
+        String projectId = normalizeIdentifier(requestedProjectId);
+        if (projectId != null && unassignedOnly) {
+            throw new BaseException(
+                    ErrorCodes.INVALID_REQUEST,
+                    "projectId and unassignedOnly cannot be used together"
+            );
+        }
+        if (projectId != null && chatProjectMapper.findByIdAndUserId(projectId, userId) == null) {
+            throw resourceNotFound("Project not found");
+        }
+
         ConversationCursor cursor = decodeCursor(encodedCursor);
         List<ChatConversation> rows = chatConversationMapper.findPageByUserId(
                 userId,
                 cursor == null ? null : cursor.lastMessageAt(),
                 cursor == null ? null : cursor.id(),
+                projectId,
+                unassignedOnly,
                 pageSize + 1
         );
         boolean hasMore = rows.size() > pageSize;
@@ -112,6 +140,66 @@ public class ConversationManager {
                 ? encodeCursor(pageRows.getLast())
                 : null;
         return new ConversationPage(items, nextCursor, hasMore);
+    }
+
+    public List<ProjectView> listProjects(Long userId) {
+        return chatProjectMapper.findAllByUserId(userId)
+                .stream()
+                .map(ProjectView::from)
+                .toList();
+    }
+
+    public ProjectView getProject(Long userId, String projectId) {
+        ChatProject project = findProject(userId, projectId);
+        return ProjectView.from(project);
+    }
+
+    @Transactional
+    public ProjectView createProject(Long userId, String requestedName) {
+        String name = requestedName == null ? "" : requestedName.strip();
+        if (name.isEmpty()) {
+            throw new BaseException(ErrorCodes.INVALID_REQUEST, "Project name is required");
+        }
+        if (name.length() > 100) {
+            throw new BaseException(
+                    ErrorCodes.INVALID_REQUEST,
+                    "Project name must not exceed 100 characters"
+            );
+        }
+
+        ChatProject project = ChatProject.builder()
+                .id(UUID.randomUUID().toString())
+                .userId(userId)
+                .name(name)
+                .build();
+        chatProjectMapper.insert(project);
+        return ProjectView.from(chatProjectMapper.findByIdAndUserId(project.getId(), userId));
+    }
+
+    @Transactional
+    public ConversationSummary moveConversation(
+            Long userId,
+            String conversationId,
+            String requestedProjectId
+    ) {
+        ChatConversation conversation = chatConversationMapper.findByIdAndUserId(
+                conversationId,
+                userId
+        );
+        if (conversation == null) {
+            throw resourceNotFound("Conversation not found");
+        }
+
+        String projectId = normalizeIdentifier(requestedProjectId);
+        if (projectId != null) {
+            findProject(userId, projectId);
+        }
+        if (chatConversationMapper.updateProject(conversationId, userId, projectId) != 1) {
+            throw resourceNotFound("Conversation not found");
+        }
+        return ConversationSummary.from(
+                chatConversationMapper.findByIdAndUserId(conversationId, userId)
+        );
     }
 
     public ConversationDetail getConversation(Long userId, String conversationId) {
@@ -266,6 +354,18 @@ public class ConversationManager {
             return null;
         }
         return identifier.strip();
+    }
+
+    private ChatProject findProject(Long userId, String requestedProjectId) {
+        String projectId = normalizeIdentifier(requestedProjectId);
+        if (projectId == null) {
+            throw resourceNotFound("Project not found");
+        }
+        ChatProject project = chatProjectMapper.findByIdAndUserId(projectId, userId);
+        if (project == null) {
+            throw resourceNotFound("Project not found");
+        }
+        return project;
     }
 
     private String encodeCursor(ChatConversation conversation) {

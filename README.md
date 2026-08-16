@@ -23,6 +23,10 @@ The current milestone is a small, explicit **LLM gateway**. Clients provide a pr
 - Username/password registration and login with BCrypt password hashing
 - Revocable Bearer sessions backed by hashed tokens in MySQL
 - Authentication protection for all gateway and usage APIs
+- Persistent user/assistant conversation history with cursor pagination
+- SSE chat streaming with incremental Markdown rendering in the web UI
+- User-owned projects that group related conversations
+- ChatGPT-style sidebar navigation with project creation and conversation moves
 
 ## Request Flow
 
@@ -49,6 +53,11 @@ POST /api/v1/chat/completions
 Content-Type: application/json
 ```
 
+Use the same request body with `POST /api/v1/chat/completions/stream` to receive
+`text/event-stream`. Every `message` event contains a normalized `LlmResponse` chunk. The first
+event supplies the `conversationId`, content chunks follow as the provider emits them, and token
+usage is included when the provider reports it. Only the assembled assistant response is persisted.
+
 ```json
 {
   "provider": "gemini",
@@ -74,6 +83,24 @@ Omit `conversationId` to create a conversation. Send the returned ID with the ne
 append the new user and assistant messages to the same conversation and include its history in
 the model request. `projectId` is optional when creating a conversation. Token values depend on
 whether the selected provider returns usage metadata.
+
+### Conversations and Projects
+
+```http
+GET   /api/v1/conversations?limit=20&unassignedOnly=true
+GET   /api/v1/conversations?limit=20&projectId=<project-id>
+GET   /api/v1/conversations/<conversation-id>
+PATCH /api/v1/conversations/<conversation-id>/project
+
+GET  /api/v1/projects
+GET  /api/v1/projects/<project-id>
+POST /api/v1/projects
+```
+
+Conversation lists use an opaque cursor returned as `nextCursor`. Sending `projectId` when the
+first message creates a conversation directly in that project. The move endpoint accepts a
+project ID or `null` to return the conversation to the unassigned Chats list. Every project and
+conversation lookup is scoped to the authenticated user.
 
 ### Model Discovery
 
@@ -173,6 +200,7 @@ Create the local database tables in migration order:
 mysql -u root -p < database/mysql/001_create_llm_request_record.sql
 mysql -u root -p < database/mysql/002_create_auth_tables.sql
 mysql -u root -p < database/mysql/003_add_user_role_and_request_owner.sql
+mysql -u root -p < database/mysql/004_create_chat_tables.sql
 ```
 
 Create a dedicated application user from the MySQL console:
@@ -197,6 +225,7 @@ export AI_PLATFORM_DB_PASSWORD="your-local-database-password"
 export GEMINI_API_KEY="your-gemini-api-key"
 export GROQ_API_KEY="your-groq-api-key"
 export AUTH_SESSION_TTL="12h"
+export CHAT_STREAM_TIMEOUT="5m"
 ```
 
 Install the frontend dependencies once:
@@ -262,7 +291,7 @@ them rather than having the application write directly to Elasticsearch.
 
 - Java 21
 - Spring Boot 4
-- Spring MVC `RestClient`
+- Spring MVC with `RestClient` for regular calls and `WebClient`/Reactor `Flux` for streaming calls
 - Jackson
 - MySQL 8.4
 - MyBatis 4 with XML mappers
